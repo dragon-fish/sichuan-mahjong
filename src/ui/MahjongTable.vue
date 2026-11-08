@@ -8,6 +8,7 @@ import OpponentSeat from './OpponentSeat.vue'
 import ResultPanel from './ResultPanel.vue'
 import RiverTiles from './RiverTiles.vue'
 import SeatBadge from './SeatBadge.vue'
+import { moveSlot, reconcile, sortSlots, type HandSlot } from './handOrder'
 import { handCounts, provideTableUi, waitsWithLeft, type Wait } from './hints'
 import { ME, SEAT_NAMES, type Session } from './session'
 
@@ -88,12 +89,21 @@ async function copyText(text: string): Promise<boolean> {
   return ok
 }
 
-/** Hand sorted with the 定缺 suit pushed to the right. */
-const myHand = computed(() => {
-  const que = me.value.que
-  const key = (t: Tile) => (suitOf(t) === que ? 100 : 0) + t
-  return [...view.value!.hand].sort((a, b) => key(a) - key(b))
-})
+/** My concealed hand in the order I arranged it (the drawn tile stays apart). */
+const slots = ref<HandSlot[]>([])
+watch(
+  () => view.value?.hand,
+  (hand) => (slots.value = reconcile(slots.value, hand ?? [], view.value?.seats[ME].que ?? null)),
+  { immediate: true },
+)
+// Once 定缺 is known, tidy so the 缺 suit moves to the right.
+watch(
+  () => view.value?.seats[ME].que,
+  () => tidy(),
+)
+function tidy() {
+  slots.value = sortSlots(slots.value, me.value.que)
+}
 const discardable = computed(() => new Set(actions.value.flatMap((a) => (a.type === 'discard' ? [a.tile] : []))))
 
 const suitCounts = computed(() => {
@@ -103,9 +113,10 @@ const suitCounts = computed(() => {
   return c
 })
 
+/** A hand slot id, or the drawn tile. */
 type TileKey = number | 'drawn'
 
-/** Selected (raised) tile: index into myHand, or 'drawn'. */
+/** Selected (raised) tile. */
 const selected = ref<TileKey | null>(null)
 watch(request, () => (selected.value = null))
 
@@ -114,8 +125,8 @@ const DOUBLE_TAP_MS = 300
 let lastTap = { key: null as TileKey | null, at: 0 }
 
 function tapTile(key: TileKey, tile: Tile) {
-  if (swiped) {
-    swiped = false
+  if (gestured) {
+    gestured = false
     return
   }
   if (!discardable.value.has(tile)) return
@@ -126,34 +137,75 @@ function tapTile(key: TileKey, tile: Tile) {
   else selected.value = key
 }
 
-/** Drag a tile upward past ~60% of its height to discard it. */
-const drag = ref<{ key: TileKey; tile: Tile; startY: number; dy: number; limit: number } | null>(null)
-let swiped = false
+/**
+ * Press and move a hand tile: the first clear direction decides the gesture.
+ * Up past ~60% of the tile height discards it; sideways rearranges the hand.
+ */
+const drag = ref<{
+  key: TileKey
+  tile: Tile
+  startX: number
+  startY: number
+  dy: number
+  limit: number
+  mode: 'lift' | 'move' | null
+} | null>(null)
+/** Set when a gesture ends, so the click that may follow it is ignored. */
+let gestured = false
+const GESTURE_PX = 8
 
 function dragStart(e: PointerEvent, key: TileKey, tile: Tile) {
-  // A swipe may or may not be followed by a click; only that same gesture's click is swallowed.
-  swiped = false
-  if (!discardable.value.has(tile)) return
+  gestured = false
   const el = e.currentTarget as HTMLElement
   el.setPointerCapture(e.pointerId)
-  drag.value = { key, tile, startY: e.clientY, dy: 0, limit: el.offsetHeight * 0.6 }
+  drag.value = { key, tile, startX: e.clientX, startY: e.clientY, dy: 0, limit: el.offsetHeight * 0.6, mode: null }
 }
 
 function dragMove(e: PointerEvent) {
-  if (drag.value) drag.value = { ...drag.value, dy: Math.min(0, e.clientY - drag.value.startY) }
+  const d = drag.value
+  if (!d) return
+  const dx = e.clientX - d.startX
+  const dy = e.clientY - d.startY
+  if (d.mode === null) {
+    if (Math.hypot(dx, dy) < GESTURE_PX) return
+    if (Math.abs(dx) > Math.abs(dy) && d.key !== 'drawn') d.mode = 'move'
+    else if (dy < 0 && discardable.value.has(d.tile)) d.mode = 'lift'
+    else {
+      drag.value = null
+      return
+    }
+  }
+  if (d.mode === 'lift') {
+    drag.value = { ...d, dy: Math.min(0, dy) }
+    return
+  }
+  // move: drop the tile in front of the first slot whose centre is right of the finger
+  const els = [...document.querySelectorAll<HTMLElement>('.mine .hand [data-slot]')]
+  const from = slots.value.findIndex((s) => s.id === d.key)
+  let to = els.findIndex((el) => {
+    const r = el.getBoundingClientRect()
+    return e.clientX < r.left + r.width / 2
+  })
+  if (to < 0) to = els.length
+  if (to > from) to--
+  if (to !== from) slots.value = moveSlot(slots.value, from, to)
 }
 
 function dragEnd() {
   const d = drag.value
   drag.value = null
-  if (d && -d.dy > d.limit) {
-    swiped = true
-    respond({ type: 'discard', tile: d.tile })
-  }
+  if (!d || d.mode === null) return
+  gestured = true
+  if (d.mode === 'lift' && -d.dy > d.limit) respond({ type: 'discard', tile: d.tile })
 }
 
-const dragStyle = (key: TileKey) =>
-  drag.value?.key === key && drag.value.dy < 0 ? { transform: `translateY(${drag.value.dy}px)`, transition: 'none' } : undefined
+const dragStyle = (key: TileKey) => {
+  const d = drag.value
+  if (d?.key !== key) return undefined
+  if (d.mode === 'lift' && d.dy < 0) return { transform: `translateY(${d.dy}px)`, transition: 'none' }
+  if (d.mode === 'move') return { transform: 'translateY(-12%)', opacity: 0.85 }
+  return undefined
+}
 
 /** Tap any tile on the table to light up every visible copy; tap the felt to clear. */
 function onTableTap(e: MouseEvent) {
@@ -180,8 +232,9 @@ const shownWaits = computed<Wait[]>(() => {
   if (me.value.win) return []
   if (discardable.value.size > 0) {
     if (selected.value === null) return []
-    const t = selected.value === 'drawn' ? view.value!.drawn! : myHand.value[selected.value]
-    return discardWaits.value.get(t) ?? []
+    const key = selected.value
+    const t = key === 'drawn' ? view.value!.drawn : slots.value.find((s) => s.id === key)?.tile
+    return t === undefined || t === null ? [] : (discardWaits.value.get(t) ?? [])
   }
   if (view.value!.drawn !== null) return []
   return waitsWithLeft(view.value!, handCounts(view.value!))
@@ -276,17 +329,18 @@ const statusText = computed(() => {
         </template>
         <template v-else>
           <MjTile
-            v-for="(t, i) in myHand"
-            :key="i"
-            :tile="t"
+            v-for="s in slots"
+            :key="s.id"
+            :data-slot="s.id"
+            :tile="s.tile"
             :w="5.4"
-            :que="suitOf(t) === me.que"
-            :dim="discardable.size > 0 && !discardable.has(t)"
-            :raised="selected === i"
-            :ting="discardWaits.has(t)"
-            :style="dragStyle(i)"
-            @click="tapTile(i, t)"
-            @pointerdown="dragStart($event, i, t)"
+            :que="suitOf(s.tile) === me.que"
+            :dim="discardable.size > 0 && !discardable.has(s.tile)"
+            :raised="selected === s.id"
+            :ting="discardWaits.has(s.tile)"
+            :style="dragStyle(s.id)"
+            @click="tapTile(s.id, s.tile)"
+            @pointerdown="dragStart($event, s.id, s.tile)"
             @pointermove="dragMove"
             @pointerup="dragEnd"
             @pointercancel="drag = null"
@@ -334,6 +388,7 @@ const statusText = computed(() => {
     </div>
 
     <div class="toolbar">
+      <button v-if="!me.win" @click="tidy">整理</button>
       <button :class="{ on: rankLabels }" @click="rankLabels = !rankLabels">数字</button>
       <button v-if="!result" :class="{ warn: confirmRestart }" @click="tapRestart">{{ confirmRestart ? '确认？' : '重开' }}</button>
       <button @click="copyDiagnostics">诊断</button>
