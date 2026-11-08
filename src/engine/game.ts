@@ -1,5 +1,5 @@
 import { canHu, holdsSuit, maxWaitFan, winFan, type WinSituation } from './hand'
-import { fullWall, shuffle, sortTiles, suitOf, tileName, toCounts, type Suit, type Tile } from './tiles'
+import { SUIT_NAMES, fullWall, shuffle, sortTiles, suitOf, tileCode, tileName, toCounts, type Suit, type Tile } from './tiles'
 import {
   DEFAULT_RULES,
   SEATS,
@@ -20,7 +20,7 @@ import {
   type WinKind,
 } from './types'
 
-interface SeatState {
+export interface SeatState {
   /** Concealed tiles, excluding `drawn`. */
   hand: Tile[]
   drawn: Tile | null
@@ -31,10 +31,36 @@ interface SeatState {
   delta: number
 }
 
-type Step =
+/** The round's state machine. Every step boundary is a checkpoint that can be saved and resumed. */
+export type Step =
+  | { kind: 'deal' }
+  | { kind: 'que' }
   | { kind: 'draw'; seat: Seat }
   /** `afterPeng`: may only discard. `afterGang`: the drawn tile came from the back of the wall. */
   | { kind: 'act'; seat: Seat; afterGang: boolean; afterPeng: boolean }
+  /** Others react to a discard: 胡 > 杠/碰 > 过. */
+  | { kind: 'claims'; from: Seat; tile: Tile; afterGang: boolean }
+  /** Others may rob a bugang; the tile has already left the hand. */
+  | { kind: 'qianggang'; seat: Seat; tile: Tile }
+  | { kind: 'finish' }
+  | { kind: 'done' }
+
+/** Plain-JSON copy of a round, taken at a step boundary. */
+export interface GameSnapshot {
+  version: 1
+  rules: RuleConfig
+  dealer: Seat
+  turn: Seat
+  step: Step
+  wall: Tile[]
+  seats: SeatState[]
+  log: GameEvent[]
+  payments: Payment[]
+  pendingTile: Tile | null
+  winOrder: number
+  trace: string[]
+  result: RoundResult | null
+}
 
 const GANG_REASONS: PaymentReason[] = ['minggang', 'bugang', 'angang']
 
@@ -47,6 +73,8 @@ export interface GameOptions {
   dealer: Seat
   rules?: RuleConfig
   rng?: () => number
+  /** Called with a snapshot at every step boundary, including the final `done`. */
+  onCheckpoint?: (snap: GameSnapshot) => void
 }
 
 export class Game {
@@ -62,16 +90,61 @@ export class Game {
   private pendingTile: Tile | null = null
   private winOrder = 0
   private listeners = new Set<(e: GameEvent) => void>()
+  /** Full-information play-by-play for diagnostics; not visible to players. */
+  private trace: string[] = []
   private readonly players: readonly Player[]
+  private readonly onCheckpoint?: (snap: GameSnapshot) => void
+  private step: Step = { kind: 'deal' }
 
   constructor(players: readonly Player[], opts: GameOptions) {
     if (players.length !== 4) throw new Error('need exactly 4 players')
     this.players = players
+    this.onCheckpoint = opts.onCheckpoint
     this.rules = opts.rules ?? DEFAULT_RULES
     this.dealer = opts.dealer
     this.turn = opts.dealer
     this.wall = shuffle(fullWall(), opts.rng)
     this.seats = SEATS.map(() => ({ hand: [], drawn: null, melds: [], river: [], que: null, win: null, delta: 0 }))
+  }
+
+  static restore(players: readonly Player[], snap: GameSnapshot, opts: Pick<GameOptions, 'onCheckpoint'> = {}): Game {
+    if (snap.version !== 1) throw new Error(`unsupported snapshot version ${snap.version}`)
+    const g = new Game(players, { dealer: snap.dealer, rules: snap.rules, ...opts })
+    const copy = JSON.parse(JSON.stringify(snap)) as GameSnapshot
+    g.turn = copy.turn
+    g.step = copy.step
+    g.wall = copy.wall
+    g.seats = copy.seats
+    g.log = copy.log.map((e) => deepFreeze(e))
+    g.payments = copy.payments
+    g.pendingTile = copy.pendingTile
+    g.winOrder = copy.winOrder
+    g.trace = copy.trace
+    g.result = copy.result
+    return g
+  }
+
+  snapshot(): GameSnapshot {
+    const snap: GameSnapshot = {
+      version: 1,
+      rules: this.rules,
+      dealer: this.dealer,
+      turn: this.turn,
+      step: this.step,
+      wall: this.wall,
+      seats: this.seats,
+      log: this.log,
+      payments: this.payments,
+      pendingTile: this.pendingTile,
+      winOrder: this.winOrder,
+      trace: this.trace,
+      result: this.result,
+    }
+    return JSON.parse(JSON.stringify(snap))
+  }
+
+  get finished(): boolean {
+    return this.step.kind === 'done'
   }
 
   /** Subscribe to public events. Returns an unsubscribe function. */
@@ -99,34 +172,58 @@ export class Game {
       dealer: this.dealer,
       turn: this.turn,
       wallRemaining: this.wall.length,
-      rules: this.rules,
+      rules: { ...this.rules },
       pendingTile: this.pendingTile,
       log: [...this.log],
     }
   }
 
+  /** Play from the current step (a fresh deal, or wherever a restored snapshot left off) to the end. */
   async run(): Promise<RoundResult> {
-    for (const s of this.seats) s.hand = sortTiles(this.wall.splice(0, 13))
-    this.emit({ type: 'start', dealer: this.dealer, wall: this.wall.length })
-
-    const quePicks = await Promise.all(
-      SEATS.map((seat) => this.ask(seat, ([0, 1, 2] as Suit[]).map((suit) => ({ type: 'que', suit }) as Action))),
-    )
-    quePicks.forEach((a, i) => (this.seats[i].que = (a as { suit: Suit }).suit))
-    this.emit({ type: 'que', ques: this.seats.map((s) => s.que!) })
-
-    this.draw(this.dealer, false)
-    let step: Step = { kind: 'act', seat: this.dealer, afterGang: false, afterPeng: false }
-    while (this.winnerCount() < 3) {
-      if (step.kind === 'draw') {
-        if (this.wall.length === 0) break
-        this.draw(step.seat, false)
-        step = { kind: 'act', seat: step.seat, afterGang: false, afterPeng: false }
-      } else {
-        step = await this.act(step.seat, step.afterGang, step.afterPeng)
-      }
+    while (this.step.kind !== 'done') {
+      this.onCheckpoint?.(this.snapshot())
+      this.step = await this.advance(this.step)
     }
-    return this.finish()
+    this.onCheckpoint?.(this.snapshot())
+    return this.result!
+  }
+
+  private async advance(step: Step): Promise<Step> {
+    const inPlay = step.kind === 'draw' || step.kind === 'act' || step.kind === 'claims' || step.kind === 'qianggang'
+    if (inPlay && this.winnerCount() >= 3) return { kind: 'finish' }
+    switch (step.kind) {
+      case 'deal':
+        for (const s of this.seats) s.hand = sortTiles(this.wall.splice(0, 13))
+        this.emit({ type: 'start', dealer: this.dealer, wall: this.wall.length })
+        this.draw(this.dealer, false)
+        return { kind: 'que' }
+      case 'que': {
+        const picks = await Promise.all(
+          SEATS.map((seat) => this.ask(seat, ([0, 1, 2] as Suit[]).map((suit) => ({ type: 'que', suit }) as Action))),
+        )
+        picks.forEach((a, i) => (this.seats[i].que = (a as { suit: Suit }).suit))
+        this.emit({ type: 'que', ques: this.seats.map((s) => s.que!) })
+        return { kind: 'act', seat: this.dealer, afterGang: false, afterPeng: false }
+      }
+      case 'draw':
+        if (this.wall.length === 0) return { kind: 'finish' }
+        this.draw(step.seat, false)
+        return { kind: 'act', seat: step.seat, afterGang: false, afterPeng: false }
+      case 'act':
+        return this.act(step.seat, step.afterGang, step.afterPeng)
+      case 'claims': {
+        const next = await this.claims(step.from, step.tile, step.afterGang)
+        this.pendingTile = null
+        return next
+      }
+      case 'qianggang':
+        return this.qiangGang(step.seat, step.tile)
+      case 'finish':
+        this.finish()
+        return { kind: 'done' }
+      case 'done':
+        return step
+    }
   }
 
   // ---------------------------------------------------------------- turns
@@ -167,34 +264,21 @@ export class Game {
         this.draw(seat, true)
         return { kind: 'act', seat, afterGang: true, afterPeng: false }
       }
-      case 'bugang': {
+      case 'bugang':
         this.take(seat, a.tile, 1)
         this.pendingTile = a.tile
-        const robbers = await this.claimQiangGang(seat, a.tile)
-        this.pendingTile = null
-        if (robbers.length > 0) return { kind: 'draw', seat: this.nextActive(this.farthest(seat, robbers)) }
-        const meld = s.melds.find((m) => m.kind === 'peng' && m.tile === a.tile)!
-        meld.kind = 'bugang'
-        this.emit({ type: 'gang', seat, kind: 'bugang', tile: a.tile, from: meld.from })
-        for (const o of this.activeSeats()) if (o !== seat) this.pay(o, seat, this.rules.baseScore, 'bugang', '补杠（刮风）')
-        this.draw(seat, true)
-        return { kind: 'act', seat, afterGang: true, afterPeng: false }
-      }
-      case 'discard': {
+        return { kind: 'qianggang', seat, tile: a.tile }
+      case 'discard':
         this.take(seat, a.tile, 1)
         s.river.push({ tile: a.tile, claimed: false })
-        this.emit({ type: 'discard', seat, tile: a.tile })
         this.pendingTile = a.tile
-        const next = await this.claims(seat, a.tile, afterGang)
-        this.pendingTile = null
-        return next
-      }
+        this.emit({ type: 'discard', seat, tile: a.tile })
+        return { kind: 'claims', from: seat, tile: a.tile, afterGang }
       default:
         throw new Error(`unexpected action ${a.type}`)
     }
   }
 
-  /** Others react to a discard: 胡 > 杠/碰 > 过. */
   private async claims(from: Seat, tile: Tile, afterGang: boolean): Promise<Step> {
     const options = new Map<Seat, Action[]>()
     for (const seat of this.activeSeats()) {
@@ -229,6 +313,8 @@ export class Game {
     const claim = chosen.find((c) => c.action.type === 'peng' || c.action.type === 'minggang')
     if (!claim) return { kind: 'draw', seat: this.nextActive(from) }
     last.claimed = true
+    this.pendingTile = null
+    this.turn = claim.seat
     const s = this.seats[claim.seat]
     if (claim.action.type === 'peng') {
       this.take(claim.seat, tile, 2)
@@ -242,6 +328,20 @@ export class Game {
     this.pay(from, claim.seat, 2 * this.rules.baseScore, 'minggang', '明杠')
     this.draw(claim.seat, true)
     return { kind: 'act', seat: claim.seat, afterGang: true, afterPeng: false }
+  }
+
+  /** A bugang either gets robbed (抢杠胡) or completes. */
+  private async qiangGang(seat: Seat, tile: Tile): Promise<Step> {
+    const robbers = await this.claimQiangGang(seat, tile)
+    this.pendingTile = null
+    if (robbers.length > 0) return { kind: 'draw', seat: this.nextActive(this.farthest(seat, robbers)) }
+    const s = this.seats[seat]
+    const meld = s.melds.find((m) => m.kind === 'peng' && m.tile === tile)!
+    meld.kind = 'bugang'
+    this.emit({ type: 'gang', seat, kind: 'bugang', tile, from: meld.from })
+    for (const o of this.activeSeats()) if (o !== seat) this.pay(o, seat, this.rules.baseScore, 'bugang', '补杠（刮风）')
+    this.draw(seat, true)
+    return { kind: 'act', seat, afterGang: true, afterPeng: false }
   }
 
   /** Offer 抢杠胡 on a bugang tile. Returns the seats that robbed it. */
@@ -324,9 +424,62 @@ export class Game {
     }
   }
 
+  // ---------------------------------------------------------------- diagnostics
+
+  /** Full state + play-by-play, including hidden information. For bug reports only. */
+  dump(): string {
+    const lines = [
+      `规则 底分${this.rules.baseScore} 封顶${this.rules.fanCap}番 · 庄P${this.dealer} · 轮到P${this.turn} · 牌墙剩${this.wall.length}` +
+        (this.pendingTile === null ? '' : ` · 待定牌${tileCode(this.pendingTile)}`),
+    ]
+    this.seats.forEach((s, i) => {
+      lines.push(
+        `P${i} 缺${s.que === null ? '?' : SUIT_NAMES[s.que]} 本局${s.delta >= 0 ? '+' : ''}${s.delta}` +
+          ` | 手牌 ${codes(s.hand)}${s.drawn === null ? '' : ` + 摸${tileCode(s.drawn)}`}` +
+          ` | 副露 ${s.melds.map(meldText).join(' ') || '-'}` +
+          ` | 牌河 ${s.river.map((r) => tileCode(r.tile) + (r.claimed ? '*' : '')).join(' ') || '-'}` +
+          (s.win ? ` | 胡${tileCode(s.win.tile)} ${s.win.kind}${s.win.from === undefined ? '' : '←P' + s.win.from} ${fanNote(s.win.fan)}` : ''),
+      )
+    })
+    lines.push(`牌墙 ${codes(this.wall)}`, '--- 过程（*=被碰杠胡拿走） ---', ...this.trace)
+    return lines.join('\n')
+  }
+
+  private describe(e: GameEvent): string {
+    switch (e.type) {
+      case 'start':
+        return `开局 庄P${e.dealer} 牌墙${e.wall}`
+      case 'que':
+        return `定缺 ${e.ques.map((q, i) => `P${i}=${SUIT_NAMES[q]}`).join(' ')}`
+      case 'draw':
+        return `P${e.seat} 摸${tileCode(this.seats[e.seat].drawn!)}${e.fromBack ? '（杠后补）' : ''} 剩${this.wall.length}`
+      case 'discard':
+        return `P${e.seat} 打${tileCode(e.tile)}`
+      case 'peng':
+        return `P${e.seat} 碰${tileCode(e.tile)}←P${e.from}`
+      case 'gang': {
+        const tile = e.tile ?? this.seats[e.seat].melds.at(-1)!.tile
+        const name = { minggang: '明杠', bugang: '补杠', angang: '暗杠' }[e.kind]
+        return `P${e.seat} ${name}${tileCode(tile)}${e.from === undefined || e.kind !== 'minggang' ? '' : '←P' + e.from}`
+      }
+      case 'hu': {
+        const s = this.seats[e.seat]
+        return `P${e.seat} 胡${tileCode(e.win.tile)} ${e.win.kind}${e.win.from === undefined ? '' : '←P' + e.win.from} [${fanNote(e.win.fan)}] 手牌 ${codes(s.hand)} 副露 ${s.melds.map(meldText).join(' ') || '-'}`
+      }
+      case 'payment': {
+        const p = e.payment
+        return `  付 P${p.from}→P${p.to} ${p.amount} ${p.reason} ${p.note}`
+      }
+      case 'end':
+        return `结束 ${e.result.liuju ? '牌墙摸完' : '三家胡'} 得分 ${e.result.deltas.join(' ')}`
+    }
+  }
+
   // ---------------------------------------------------------------- helpers
 
   private emit(e: GameEvent) {
+    deepFreeze(e)
+    this.trace.push(this.describe(e))
     this.log.push(e)
     this.players.forEach((p, i) => p.onEvent?.(e, this.viewFor(i as Seat)))
     for (const l of this.listeners) l(e)
@@ -336,6 +489,9 @@ export class Game {
     const a = await this.players[seat].decide(this.viewFor(seat), actions)
     const match = actions.find((x) => sameAction(x, a))
     if (!match) throw new Error(`seat ${seat} returned illegal action ${JSON.stringify(a)}`)
+    if (match.type !== 'discard' && match.type !== 'que') {
+      this.trace.push(`  P${seat} 可选[${actions.filter((x) => x.type !== 'discard').map(actionText).join(' ')}] → ${actionText(match)}`)
+    }
     return match
   }
 
@@ -365,6 +521,7 @@ export class Game {
     return toCounts(s.drawn === null ? s.hand : [...s.hand, s.drawn])
   }
 
+  /** In 一炮多响 every winner's hand shows the one discarded tile, so displayed tiles can exceed 108. */
   private declareWins(wins: { seat: Seat; tile: Tile; kind: WinKind; from?: Seat; fan: FanResult }[]) {
     const order = this.winOrder++
     for (const w of wins) {
@@ -412,6 +569,22 @@ export class Game {
   private farthest(from: Seat, winners: Seat[]): Seat {
     return winners.reduce((a, b) => ((b - from + 4) % 4 > (a - from + 4) % 4 ? b : a))
   }
+}
+
+const codes = (tiles: readonly Tile[]) => tiles.map(tileCode).join('') || '-'
+const meldText = (m: Meld) => `${{ peng: '碰', minggang: '明杠', bugang: '补杠', angang: '暗杠' }[m.kind]}${tileCode(m.tile)}`
+
+function actionText(a: Action): string {
+  const names = { que: '定缺', discard: '打', hu: '胡', peng: '碰', minggang: '明杠', angang: '暗杠', bugang: '补杠', pass: '过' }
+  return names[a.type] + ('tile' in a ? tileCode(a.tile) : '')
+}
+
+function deepFreeze<T>(o: T): T {
+  if (o && typeof o === 'object' && !Object.isFrozen(o)) {
+    Object.freeze(o)
+    for (const v of Object.values(o)) deepFreeze(v)
+  }
+  return o
 }
 
 export function fanNote(fan: FanResult): string {

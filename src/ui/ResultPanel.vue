@@ -99,6 +99,7 @@ h2 {
 }
 .concealed {
   display: flex;
+  gap: calc(var(--u) * 0.2);
 }
 .payments {
   overflow-y: auto;

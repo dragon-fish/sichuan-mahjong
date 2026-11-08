@@ -16,7 +16,7 @@ const shown = computed(() => props.river.map((r, i) => ({ ...r, last: i === prop
 <style scoped>
 .river {
   display: grid;
-  gap: calc(var(--u) * 0.15);
+  gap: calc(var(--u) * 0.3);
   align-content: start;
 }
 </style>

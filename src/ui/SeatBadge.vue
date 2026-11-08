@@ -1,8 +1,17 @@
 <script setup lang="ts">
-import { SUIT_NAMES } from '../engine/tiles'
+import { computed } from 'vue'
+import { SUIT_NAMES, tileName } from '../engine/tiles'
 import type { SeatView } from '../engine/types'
+import { SEAT_NAMES } from './session'
 
-defineProps<{ sv: SeatView; name: string; total: number; dealer: boolean; turn: boolean }>()
+const props = defineProps<{ sv: SeatView; name: string; total: number; dealer: boolean; turn: boolean }>()
+
+const winText = computed(() => {
+  const w = props.sv.win
+  if (!w) return ''
+  const how = w.kind === 'zimo' ? '自摸' : w.kind === 'qianggang' ? `抢${SEAT_NAMES[w.from!]}的杠` : `${SEAT_NAMES[w.from!]}点炮`
+  return `胡${tileName(w.tile)} · ${how} · ${w.fan.items.map((it) => it.name).join(' ')} ${w.fan.total}番`
+})
 </script>
 
 <template>
@@ -17,6 +26,7 @@ defineProps<{ sv: SeatView; name: string; total: number; dealer: boolean; turn: 
       {{ total + sv.delta }}
       <span v-if="sv.delta" :class="sv.delta > 0 ? 'up' : 'down'">({{ sv.delta > 0 ? '+' : '' }}{{ sv.delta }})</span>
     </div>
+    <div v-if="winText" class="how">{{ winText }}</div>
   </div>
 </template>
 
@@ -53,6 +63,12 @@ defineProps<{ sv: SeatView; name: string; total: number; dealer: boolean; turn: 
 .score {
   font-size: calc(var(--u) * 1.4);
   opacity: 0.9;
+}
+.how {
+  font-size: calc(var(--u) * 1.2);
+  color: #ffd84a;
+  white-space: normal;
+  max-width: calc(var(--u) * 16);
 }
 .up {
   color: #7dff9a;

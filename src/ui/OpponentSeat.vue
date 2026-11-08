@@ -17,6 +17,7 @@ const props = defineProps<{
 const vertical = computed(() => props.pos !== 'top')
 const rot = computed(() => (props.pos === 'left' ? 90 : props.pos === 'right' ? 270 : 0))
 const backs = computed(() => new Array(props.sv.handCount).fill(null))
+const winIndex = computed(() => (props.sv.win && props.sv.winHand ? props.sv.winHand.lastIndexOf(props.sv.win.tile) : -1))
 </script>
 
 <template>
@@ -28,7 +29,7 @@ const backs = computed(() => new Array(props.sv.handCount).fill(null))
         :key="i"
         :tile="t"
         :w="vertical ? 2.2 : 2.4"
-        :hot="t === sv.win?.tile"
+        :hot="i === winIndex"
       />
     </div>
     <div v-else class="hand">
@@ -56,6 +57,10 @@ const backs = computed(() => new Array(props.sv.handCount).fill(null))
 }
 .hand {
   display: flex;
+  gap: calc(var(--u) * 0.12);
+}
+.hand.won {
+  gap: calc(var(--u) * 0.2);
 }
 .left .hand:not(.won),
 .right .hand:not(.won) {

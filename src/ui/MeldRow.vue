@@ -31,5 +31,6 @@ function tilesOf(m: PublicMeld) {
 }
 .meld {
   display: flex;
+  gap: calc(var(--u) * 0.12);
 }
 </style>

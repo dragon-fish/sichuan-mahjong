@@ -11,7 +11,7 @@ import SeatBadge from './SeatBadge.vue'
 import { ME, SEAT_NAMES, type Session } from './session'
 
 const props = defineProps<{ session: Session }>()
-const { view, request, result, totals, round, floats, startRound } = props.session
+const { view, request, result, totals, startTotals, round, floats, startRound, diagnostics } = props.session
 
 const OPPONENTS = [
   { seat: 1 as Seat, pos: 'right' as const },
@@ -23,6 +23,47 @@ const me = computed(() => view.value!.seats[ME])
 const actions = computed<Action[]>(() => request.value?.actions ?? [])
 const queChoice = computed(() => actions.value[0]?.type === 'que')
 const isClaim = computed(() => actions.value.some((a) => a.type === 'pass'))
+/** The discard / bugang tile being decided on. Read from the request: the live view may predate it. */
+const pendingTile = computed(() => request.value?.view.pendingTile ?? null)
+const myWinIndex = computed(() => (me.value.win && me.value.winHand ? me.value.winHand.lastIndexOf(me.value.win.tile) : -1))
+
+const toast = ref('')
+const diagText = ref('')
+async function copyDiagnostics() {
+  const text = diagnostics()
+  if (await copyText(text)) {
+    toast.value = '诊断数据已复制'
+    setTimeout(() => (toast.value = ''), 1500)
+  } else {
+    diagText.value = text
+  }
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // fall through to execCommand; plain-http LAN pages have no async clipboard
+  }
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  ta.setSelectionRange(0, text.length)
+  let ok = false
+  try {
+    ok = document.execCommand('copy')
+  } catch {
+    ok = false
+  }
+  ta.remove()
+  return ok
+}
 
 /** Hand sorted with the 定缺 suit pushed to the right. */
 const myHand = computed(() => {
@@ -88,7 +129,10 @@ const lastDiscarder = computed(() => {
 const statusText = computed(() => {
   if (result.value) return '本局结束'
   if (queChoice.value) return '请选择定缺'
-  if (isClaim.value) return `${tileName(view.value!.pendingTile!)}：要吗？`
+  if (isClaim.value && pendingTile.value !== null) {
+    const onlyHu = actions.value.every((a) => a.type === 'hu' || a.type === 'pass')
+    return `${tileName(pendingTile.value)}：${onlyHu ? '胡吗？' : '要吗？'}`
+  }
   if (request.value) return me.value.win ? '' : '轮到你出牌，点两下打出'
   if (me.value.win) return '你已胡牌，观战中'
   return `${SEAT_NAMES[view.value!.turn]}思考中…`
@@ -104,7 +148,7 @@ const statusText = computed(() => {
       :sv="view.seats[o.seat]"
       :pos="o.pos"
       :name="SEAT_NAMES[o.seat]"
-      :total="totals[o.seat]"
+      :total="startTotals[o.seat]"
       :dealer="view.dealer === o.seat"
       :turn="view.turn === o.seat"
     />
@@ -121,11 +165,11 @@ const statusText = computed(() => {
     </div>
 
     <div class="mine">
-      <SeatBadge :sv="me" :name="SEAT_NAMES[ME]" :total="totals[ME]" :dealer="view.dealer === ME" :turn="view.turn === ME" />
+      <SeatBadge :sv="me" :name="SEAT_NAMES[ME]" :total="startTotals[ME]" :dealer="view.dealer === ME" :turn="view.turn === ME" />
       <MeldRow :melds="me.melds" :w="3.6" />
       <div class="hand">
         <template v-if="me.winHand">
-          <MjTile v-for="(t, i) in me.winHand" :key="i" :tile="t" :w="5" :hot="t === me.win?.tile" />
+          <MjTile v-for="(t, i) in me.winHand" :key="i" :tile="t" :w="5" :hot="i === myWinIndex" />
         </template>
         <template v-else>
           <MjTile
@@ -152,7 +196,7 @@ const statusText = computed(() => {
       </div>
 
       <div v-if="buttons.length" class="actions">
-        <MjTile v-if="isClaim && view.pendingTile !== null" :tile="view.pendingTile" :w="3.6" />
+        <MjTile v-if="isClaim && pendingTile !== null" :tile="pendingTile" :w="3.6" />
         <button v-for="(b, i) in buttons" :key="i" :class="b.cls" @click="respond(b.a)">{{ b.label }}</button>
       </div>
     </div>
@@ -170,6 +214,16 @@ const statusText = computed(() => {
 
     <div v-for="f in floats" :key="f.id" class="float" :class="`seat${f.seat}`">{{ f.text }}</div>
 
+    <button class="diag" @click="copyDiagnostics">复制诊断</button>
+    <div v-if="toast" class="toast">{{ toast }}</div>
+    <div v-if="diagText" class="diag-mask" @click.self="diagText = ''">
+      <div class="diag-box">
+        <div>自动复制失败，请长按全选复制</div>
+        <textarea readonly :value="diagText" />
+        <button @click="diagText = ''">关闭</button>
+      </div>
+    </div>
+
     <ResultPanel v-if="result" :result="result" :totals="totals" @next="startRound" />
   </div>
 </template>
@@ -181,7 +235,7 @@ const statusText = computed(() => {
   padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left);
   display: grid;
   grid-template-columns: calc(var(--u) * 12) 1fr calc(var(--u) * 12);
-  grid-template-rows: calc(var(--u) * 8.5) 1fr calc(var(--u) * 12.5);
+  grid-template-rows: calc(var(--u) * 9.5) 1fr calc(var(--u) * 12.5);
   background: radial-gradient(ellipse at center, #237a50 0%, #0f3d28 100%);
   overflow: hidden;
 }
@@ -196,6 +250,7 @@ const statusText = computed(() => {
 .top {
   grid-column: 2;
   grid-row: 1;
+  padding-top: calc(var(--u) * 2.4);
 }
 .center {
   grid-column: 2;
@@ -254,6 +309,7 @@ const statusText = computed(() => {
 .hand {
   display: flex;
   align-items: flex-end;
+  gap: calc(var(--u) * 0.35);
 }
 .hand .tile {
   cursor: pointer;
@@ -328,6 +384,56 @@ const statusText = computed(() => {
 .que-btns small {
   font-size: calc(var(--u) * 1.3);
   font-weight: normal;
+}
+.diag {
+  position: fixed;
+  left: 50%;
+  top: calc(var(--u) * 0.5);
+  transform: translateX(-50%);
+  z-index: 8;
+  font-size: calc(var(--u) * 1.3);
+  padding: calc(var(--u) * 0.3) calc(var(--u) * 1);
+  border: none;
+  border-radius: calc(var(--u) * 0.6);
+  background: rgba(0, 0, 0, 0.3);
+  color: rgba(255, 255, 255, 0.7);
+}
+.toast {
+  position: fixed;
+  left: 50%;
+  top: 40%;
+  transform: translateX(-50%);
+  z-index: 30;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  padding: calc(var(--u) * 0.8) calc(var(--u) * 2);
+  border-radius: calc(var(--u) * 0.8);
+  font-size: calc(var(--u) * 1.8);
+}
+.diag-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.6);
+  display: grid;
+  place-items: center;
+}
+.diag-box {
+  width: 85vw;
+  height: 80dvh;
+  background: #fff;
+  border-radius: calc(var(--u) * 1);
+  padding: calc(var(--u) * 1);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.8);
+  font-size: calc(var(--u) * 1.6);
+}
+.diag-box textarea {
+  flex: 1;
+  font-size: 12px;
+  user-select: text;
+  -webkit-user-select: text;
 }
 .float {
   position: fixed;

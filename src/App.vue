@@ -4,7 +4,7 @@ import MahjongTable from './ui/MahjongTable.vue'
 import { useSession } from './ui/session'
 
 const session = useSession()
-onMounted(() => session.startRound())
+onMounted(() => session.resume() || session.startRound())
 </script>
 
 <template>
