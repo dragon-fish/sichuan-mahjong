@@ -894,6 +894,7 @@ const statusText = computed(() => {
 }
 .flash {
   --glow: #2e86de;
+  --glow-dark: color-mix(in srgb, var(--glow) 55%, #000);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -938,19 +939,29 @@ const statusText = computed(() => {
   color: var(--gold-hi);
 }
 .flash-text {
-  font-family: 'Kaiti SC', 'STKaiti', 'KaiTi', 'BiauKai', serif;
-  font-size: calc(var(--u) * 13);
-  line-height: 1.05;
+  --edge: calc(var(--u) * 0.25);
+  /* Kaiti is missing on iOS (falls back to a faux-bold serif); stick to the system sans everywhere. */
+  font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  font-size: calc(var(--u) * 12);
+  line-height: 1.1;
   font-weight: 900;
-  background: linear-gradient(180deg, #ffffff 15%, color-mix(in srgb, var(--glow) 35%, #fff) 60%, var(--glow) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  -webkit-text-stroke: calc(var(--u) * 0.2) rgba(0, 0, 0, 0.55);
-  filter: drop-shadow(0 0 calc(var(--u) * 1.4) var(--glow)) drop-shadow(0 calc(var(--u) * 0.4) calc(var(--u) * 0.3) rgba(0, 0, 0, 0.6));
+  color: color-mix(in srgb, var(--glow) 25%, #fff);
+  /* Outline from shadows, not -webkit-text-stroke: CJK glyphs are overlapping stroke contours,
+     and text-stroke outlines each one, leaving lines across every crossing. */
+  text-shadow:
+    var(--edge) 0 0 var(--glow-dark),
+    calc(var(--edge) * -1) 0 0 var(--glow-dark),
+    0 var(--edge) 0 var(--glow-dark),
+    0 calc(var(--edge) * -1) 0 var(--glow-dark),
+    var(--edge) var(--edge) 0 var(--glow-dark),
+    calc(var(--edge) * -1) var(--edge) 0 var(--glow-dark),
+    var(--edge) calc(var(--edge) * -1) 0 var(--glow-dark),
+    calc(var(--edge) * -1) calc(var(--edge) * -1) 0 var(--glow-dark),
+    0 calc(var(--u) * 0.6) calc(var(--u) * 0.4) rgba(0, 0, 0, 0.55),
+    0 0 calc(var(--u) * 2.4) var(--glow);
 }
 .flash-hu .flash-text {
-  background-image: linear-gradient(180deg, #fffbe6 10%, #ffd65a 50%, #ff8a1e 100%);
+  color: #ffe58a;
 }
 @keyframes flash {
   0% {
