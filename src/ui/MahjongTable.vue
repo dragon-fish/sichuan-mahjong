@@ -8,10 +8,13 @@ import OpponentSeat from './OpponentSeat.vue'
 import ResultPanel from './ResultPanel.vue'
 import RiverTiles from './RiverTiles.vue'
 import SeatBadge from './SeatBadge.vue'
+import { handCounts, provideTableUi, waitsWithLeft, type Wait } from './hints'
 import { ME, SEAT_NAMES, type Session } from './session'
 
 const props = defineProps<{ session: Session }>()
 const { view, request, result, totals, startTotals, round, floats, startRound, diagnostics } = props.session
+
+const { focus, rankLabels } = provideTableUi()
 
 const OPPONENTS = [
   { seat: 1 as Seat, pos: 'right' as const },
@@ -86,15 +89,83 @@ const suitCounts = computed(() => {
   return c
 })
 
+type TileKey = number | 'drawn'
+
 /** Selected tile: index into myHand, or 'drawn'. Tap once to raise, again to discard. */
-const selected = ref<number | 'drawn' | null>(null)
+const selected = ref<TileKey | null>(null)
 watch(request, () => (selected.value = null))
 
-function tapTile(key: number | 'drawn', tile: Tile) {
+function tapTile(key: TileKey, tile: Tile) {
+  if (swiped) {
+    swiped = false
+    return
+  }
   if (!discardable.value.has(tile)) return
   if (selected.value === key) respond({ type: 'discard', tile })
   else selected.value = key
 }
+
+/** Drag a tile upward past ~60% of its height to discard it. */
+const drag = ref<{ key: TileKey; tile: Tile; startY: number; dy: number; limit: number } | null>(null)
+let swiped = false
+
+function dragStart(e: PointerEvent, key: TileKey, tile: Tile) {
+  // A swipe may or may not be followed by a click; only that same gesture's click is swallowed.
+  swiped = false
+  if (!discardable.value.has(tile)) return
+  const el = e.currentTarget as HTMLElement
+  el.setPointerCapture(e.pointerId)
+  drag.value = { key, tile, startY: e.clientY, dy: 0, limit: el.offsetHeight * 0.6 }
+}
+
+function dragMove(e: PointerEvent) {
+  if (drag.value) drag.value = { ...drag.value, dy: Math.min(0, e.clientY - drag.value.startY) }
+}
+
+function dragEnd() {
+  const d = drag.value
+  drag.value = null
+  if (d && -d.dy > d.limit) {
+    swiped = true
+    respond({ type: 'discard', tile: d.tile })
+  }
+}
+
+const dragStyle = (key: TileKey) =>
+  drag.value?.key === key && drag.value.dy < 0 ? { transform: `translateY(${drag.value.dy}px)`, transition: 'none' } : undefined
+
+/** Tap any tile on the table to light up every visible copy; tap the felt to clear. */
+function onTableTap(e: MouseEvent) {
+  const el = (e.target as HTMLElement).closest<HTMLElement>('[data-tile]')
+  focus.value = el ? Number(el.dataset.tile) : null
+}
+
+/** On my discard turn: what each discard would leave me waiting on. */
+const discardWaits = computed(() => {
+  const out = new Map<Tile, Wait[]>()
+  if (discardable.value.size === 0 || me.value.win) return out
+  const counts = handCounts(view.value!)
+  for (const t of discardable.value) {
+    counts[t]--
+    const w = waitsWithLeft(view.value!, counts)
+    counts[t]++
+    if (w.length) out.set(t, w)
+  }
+  return out
+})
+
+/** Waits to show: for the raised tile on my turn, otherwise for my current 13-tile hand. */
+const shownWaits = computed<Wait[]>(() => {
+  if (me.value.win) return []
+  if (discardable.value.size > 0) {
+    if (selected.value === null) return []
+    const t = selected.value === 'drawn' ? view.value!.drawn! : myHand.value[selected.value]
+    return discardWaits.value.get(t) ?? []
+  }
+  if (view.value!.drawn !== null) return []
+  return waitsWithLeft(view.value!, handCounts(view.value!))
+})
+const allGone = computed(() => shownWaits.value.length > 0 && shownWaits.value.every((w) => w.left === 0))
 
 function respond(a: Action) {
   request.value?.respond(a)
@@ -134,19 +205,16 @@ const lastDiscarder = computed(() => {
 
 const statusText = computed(() => {
   if (result.value) return '本局结束'
-  if (queChoice.value) return '请选择定缺'
-  if (isClaim.value && pendingTile.value !== null) {
-    const onlyHu = actions.value.every((a) => a.type === 'hu' || a.type === 'pass')
-    return `${tileName(pendingTile.value)}：${onlyHu ? '胡吗？' : '要吗？'}`
-  }
-  if (request.value) return me.value.win ? '' : '轮到你出牌，点两下打出'
-  if (me.value.win) return '你已胡牌，观战中'
-  return `${SEAT_NAMES[view.value!.turn]}思考中…`
+  if (queChoice.value) return '定缺'
+  if (isClaim.value) return ''
+  if (request.value) return '出牌'
+  if (me.value.win) return '观战'
+  return `${SEAT_NAMES[view.value!.turn]}…`
 })
 </script>
 
 <template>
-  <div v-if="view" class="table">
+  <div v-if="view" class="table" @click="onTableTap">
     <OpponentSeat
       v-for="o in OPPONENTS"
       :key="o.seat"
@@ -167,6 +235,13 @@ const statusText = computed(() => {
       <div class="info">
         <div>第 {{ round }} 局 · 剩 {{ view.wallRemaining }} 张</div>
         <div class="status">{{ statusText }}</div>
+        <div v-if="shownWaits.length" class="waits" :class="{ gone: allGone }">
+          <span class="ting-tag">听</span>
+          <span v-for="w in shownWaits" :key="w.tile" class="wait" :class="{ dead: w.left === 0 }">
+            <MjTile :tile="w.tile" :w="2.6" />
+            <b>{{ w.left }}</b>
+          </span>
+        </div>
       </div>
     </div>
 
@@ -187,7 +262,13 @@ const statusText = computed(() => {
             :que="suitOf(t) === me.que"
             :dim="discardable.size > 0 && !discardable.has(t)"
             :raised="selected === i"
+            :ting="discardWaits.has(t)"
+            :style="dragStyle(i)"
             @click="tapTile(i, t)"
+            @pointerdown="dragStart($event, i, t)"
+            @pointermove="dragMove"
+            @pointerup="dragEnd"
+            @pointercancel="drag = null"
           />
           <MjTile
             v-if="view.drawn !== null"
@@ -197,7 +278,13 @@ const statusText = computed(() => {
             :que="suitOf(view.drawn) === me.que"
             :dim="discardable.size > 0 && !discardable.has(view.drawn)"
             :raised="selected === 'drawn'"
+            :ting="discardWaits.has(view.drawn)"
+            :style="dragStyle('drawn')"
             @click="tapTile('drawn', view.drawn)"
+            @pointerdown="dragStart($event, 'drawn', view.drawn)"
+            @pointermove="dragMove"
+            @pointerup="dragEnd"
+            @pointercancel="drag = null"
           />
         </template>
       </div>
@@ -210,10 +297,9 @@ const statusText = computed(() => {
 
     <div v-if="queChoice" class="que-mask">
       <div class="que-box">
-        <div>选一门不要（定缺）</div>
         <div class="que-btns">
           <button v-for="s in [0, 1, 2] as Suit[]" :key="s" @click="respond({ type: 'que', suit: s })">
-            缺{{ SUIT_NAMES[s] }}<small>手里 {{ suitCounts[s] }} 张</small>
+            缺{{ SUIT_NAMES[s] }}<small>{{ suitCounts[s] }} 张</small>
           </button>
         </div>
       </div>
@@ -226,7 +312,10 @@ const statusText = computed(() => {
       </div>
     </div>
 
-    <button class="diag" @click="copyDiagnostics">复制诊断</button>
+    <div class="toolbar">
+      <button :class="{ on: rankLabels }" @click="rankLabels = !rankLabels">数字</button>
+      <button @click="copyDiagnostics">诊断</button>
+    </div>
     <div v-if="toast" class="toast">{{ toast }}</div>
     <div v-if="diagText" class="diag-mask" @click.self="diagText = ''">
       <div class="diag-box">
@@ -325,6 +414,38 @@ const statusText = computed(() => {
 }
 .hand .tile {
   cursor: pointer;
+  touch-action: none;
+}
+.waits {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: calc(var(--u) * 0.6);
+  margin-top: calc(var(--u) * 0.4);
+}
+.ting-tag {
+  align-self: center;
+  padding: 0 calc(var(--u) * 0.5);
+  border-radius: calc(var(--u) * 0.5);
+  background: #27ae60;
+  color: #fff;
+  font-weight: bold;
+}
+.waits.gone .ting-tag {
+  background: #c0392b;
+}
+.wait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: calc(var(--u) * 1.4);
+  line-height: 1.2;
+}
+.wait.dead {
+  opacity: 0.5;
+}
+.wait.dead b {
+  color: #ff6b6b;
 }
 .drawn {
   margin-left: calc(var(--u) * 1.2);
@@ -397,18 +518,26 @@ const statusText = computed(() => {
   font-size: calc(var(--u) * 1.3);
   font-weight: normal;
 }
-.diag {
+.toolbar {
   position: fixed;
   left: 50%;
   top: calc(var(--u) * 0.5);
   transform: translateX(-50%);
   z-index: 8;
+  display: flex;
+  gap: calc(var(--u) * 0.6);
+}
+.toolbar button {
   font-size: calc(var(--u) * 1.3);
   padding: calc(var(--u) * 0.3) calc(var(--u) * 1);
   border: none;
   border-radius: calc(var(--u) * 0.6);
   background: rgba(0, 0, 0, 0.3);
   color: rgba(255, 255, 255, 0.7);
+}
+.toolbar button.on {
+  background: #27ae60;
+  color: #fff;
 }
 .toast {
   position: fixed;
