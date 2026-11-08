@@ -7,20 +7,22 @@ import { RuleBotPlayer } from '../players/ruleBot'
 export const ME: Seat = 0
 export const SEAT_NAMES = ['你', '下家', '对家', '上家'] as const
 
+/** Big centre-screen callout for 碰 / 杠 / 胡. */
 export interface FloatText {
   id: number
   seat: Seat
+  kind: 'peng' | 'gang' | 'hu'
   text: string
 }
 
-function floatFor(e: GameEvent): { seat: Seat; text: string } | null {
+function floatFor(e: GameEvent): Omit<FloatText, 'id'> | null {
   switch (e.type) {
     case 'peng':
-      return { seat: e.seat, text: '碰' }
+      return { seat: e.seat, kind: 'peng', text: '碰' }
     case 'gang':
-      return { seat: e.seat, text: e.kind === 'angang' ? '暗杠' : e.kind === 'bugang' ? '补杠' : '杠' }
+      return { seat: e.seat, kind: 'gang', text: e.kind === 'angang' ? '暗杠' : e.kind === 'bugang' ? '补杠' : '杠' }
     case 'hu':
-      return { seat: e.seat, text: e.win.kind === 'zimo' ? '自摸' : e.win.kind === 'qianggang' ? '抢杠胡' : '胡' }
+      return { seat: e.seat, kind: 'hu', text: e.win.kind === 'zimo' ? '自摸' : e.win.kind === 'qianggang' ? '抢杠胡' : '胡' }
     default:
       return null
   }
@@ -71,7 +73,7 @@ export function useSession() {
       if (f) {
         const item = { id: floatId++, ...f }
         floats.value = [...floats.value, item]
-        setTimeout(() => (floats.value = floats.value.filter((x) => x.id !== item.id)), 1400)
+        setTimeout(() => (floats.value = floats.value.filter((x) => x.id !== item.id)), 1600)
       }
     })
   }

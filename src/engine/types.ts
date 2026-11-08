@@ -49,6 +49,9 @@ export interface WinInfo {
   order: number
 }
 
+/** A win as seen by others before the round ends: the fan stays hidden with the hand. */
+export type PublicWin = Omit<WinInfo, 'fan'> & { fan: FanResult | null }
+
 export type PaymentReason =
   | 'hu'
   | 'minggang'
@@ -85,7 +88,7 @@ export type GameEvent =
   | { type: 'discard'; seat: Seat; tile: Tile }
   | { type: 'peng'; seat: Seat; tile: Tile; from: Seat }
   | { type: 'gang'; seat: Seat; kind: 'minggang' | 'angang' | 'bugang'; tile: Tile | null; from?: Seat }
-  | { type: 'hu'; seat: Seat; win: WinInfo }
+  | { type: 'hu'; seat: Seat; win: PublicWin }
   | { type: 'payment'; payment: Payment }
   | { type: 'end'; result: RoundResult }
 
@@ -95,8 +98,9 @@ export interface SeatView {
   melds: PublicMeld[]
   river: RiverTile[]
   que: Suit | null
-  /** Set once this seat has won; its hand becomes public. */
-  win: WinInfo | null
+  /** Set once this seat has won. Only the winning tile is public until the round ends. */
+  win: PublicWin | null
+  /** The winner's full hand: visible to the winner, and to everyone once the round is over. */
   winHand: Tile[] | null
   /** Score change in this round so far. */
   delta: number

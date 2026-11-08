@@ -25,7 +25,13 @@ const queChoice = computed(() => actions.value[0]?.type === 'que')
 const isClaim = computed(() => actions.value.some((a) => a.type === 'pass'))
 /** The discard / bugang tile being decided on. Read from the request: the live view may predate it. */
 const pendingTile = computed(() => request.value?.view.pendingTile ?? null)
-const myWinIndex = computed(() => (me.value.win && me.value.winHand ? me.value.winHand.lastIndexOf(me.value.win.tile) : -1))
+/** My hand after winning, minus the winning tile (shown apart). */
+const myRestHand = computed(() => {
+  const w = me.value.win
+  const hand = [...(me.value.winHand ?? [])]
+  if (w) hand.splice(hand.lastIndexOf(w.tile), 1)
+  return hand
+})
 
 const toast = ref('')
 const diagText = ref('')
@@ -168,8 +174,9 @@ const statusText = computed(() => {
       <SeatBadge :sv="me" :name="SEAT_NAMES[ME]" :total="startTotals[ME]" :dealer="view.dealer === ME" :turn="view.turn === ME" />
       <MeldRow :melds="me.melds" :w="3.6" />
       <div class="hand">
-        <template v-if="me.winHand">
-          <MjTile v-for="(t, i) in me.winHand" :key="i" :tile="t" :w="5" :hot="i === myWinIndex" />
+        <template v-if="me.win">
+          <MjTile v-for="(t, i) in myRestHand" :key="i" :tile="t" :w="5" />
+          <MjTile class="drawn" :tile="me.win.tile" :w="5" hot />
         </template>
         <template v-else>
           <MjTile
@@ -212,7 +219,12 @@ const statusText = computed(() => {
       </div>
     </div>
 
-    <div v-for="f in floats" :key="f.id" class="float" :class="`seat${f.seat}`">{{ f.text }}</div>
+    <div v-if="floats.length" class="flash-layer">
+      <div v-for="f in floats" :key="f.id" class="flash" :class="`flash-${f.kind}`">
+        <div class="flash-who">{{ SEAT_NAMES[f.seat] }}</div>
+        <div class="flash-text">{{ f.text }}</div>
+      </div>
+    </div>
 
     <button class="diag" @click="copyDiagnostics">复制诊断</button>
     <div v-if="toast" class="toast">{{ toast }}</div>
@@ -435,50 +447,63 @@ const statusText = computed(() => {
   user-select: text;
   -webkit-user-select: text;
 }
-.float {
+.flash-layer {
   position: fixed;
+  inset: 0;
   z-index: 15;
-  font-size: calc(var(--u) * 6);
-  font-weight: 900;
-  color: #ffd84a;
-  text-shadow: 0 0 calc(var(--u) * 0.6) #000, 0 0 calc(var(--u) * 1.2) #c0392b;
-  animation: pop 1.4s ease-out forwards;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--u) * 6);
   pointer-events: none;
-  transform: translate(-50%, -50%);
 }
-.seat0 {
-  left: 50%;
-  top: 62%;
+.flash {
+  text-align: center;
+  animation: flash 1.6s ease-out forwards;
 }
-.seat1 {
-  left: 80%;
-  top: 45%;
+.flash-who {
+  font-size: calc(var(--u) * 2.4);
+  color: #fff;
+  text-shadow: 0 0 calc(var(--u) * 0.5) #000;
 }
-.seat2 {
-  left: 50%;
-  top: 25%;
+.flash-text {
+  font-size: calc(var(--u) * 13);
+  line-height: 1;
+  font-weight: 900;
+  color: #fff;
+  -webkit-text-stroke: calc(var(--u) * 0.25) rgba(0, 0, 0, 0.6);
 }
-.seat3 {
-  left: 20%;
-  top: 45%;
+.flash-peng .flash-text {
+  text-shadow: 0 0 calc(var(--u) * 2) #2e86de, 0 0 calc(var(--u) * 5) #2e86de;
 }
-@keyframes pop {
+.flash-gang .flash-text {
+  text-shadow: 0 0 calc(var(--u) * 2) #a55eea, 0 0 calc(var(--u) * 5) #a55eea;
+}
+.flash-hu .flash-text {
+  color: #ffe066;
+  text-shadow: 0 0 calc(var(--u) * 2) #ff4d4d, 0 0 calc(var(--u) * 6) #ff9f1a;
+}
+@keyframes flash {
   0% {
     opacity: 0;
-    scale: 0.5;
+    transform: scale(2.2);
   }
-  15% {
+  12% {
     opacity: 1;
-    scale: 1.15;
+    transform: scale(0.92);
   }
-  30% {
-    scale: 1;
+  22% {
+    transform: scale(1.05);
   }
-  80% {
+  32% {
+    transform: scale(1);
+  }
+  78% {
     opacity: 1;
   }
   100% {
     opacity: 0;
+    transform: scale(1.1);
   }
 }
 </style>

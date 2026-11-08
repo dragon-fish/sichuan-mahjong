@@ -155,6 +155,7 @@ export class Game {
 
   viewFor(seat: Seat): PlayerView {
     const me = this.seats[seat]
+    const over = this.step.kind === 'done'
     return {
       seat,
       hand: [...me.hand],
@@ -165,8 +166,8 @@ export class Game {
         melds: s.melds.map((m) => (i !== seat && m.kind === 'angang' ? { kind: 'angang', tile: null } : { ...m })),
         river: s.river.map((r) => ({ ...r })),
         que: s.que,
-        win: s.win,
-        winHand: s.win ? [...s.hand] : null,
+        win: s.win && !over && i !== seat ? { ...s.win, fan: null } : s.win,
+        winHand: s.win && (over || i === seat) ? [...s.hand] : null,
         delta: s.delta,
       })),
       dealer: this.dealer,
@@ -174,7 +175,7 @@ export class Game {
       wallRemaining: this.wall.length,
       rules: { ...this.rules },
       pendingTile: this.pendingTile,
-      log: [...this.log],
+      log: over ? [...this.log] : this.log.map((e) => redact(e, seat)),
     }
   }
 
@@ -464,7 +465,7 @@ export class Game {
       }
       case 'hu': {
         const s = this.seats[e.seat]
-        return `P${e.seat} 胡${tileCode(e.win.tile)} ${e.win.kind}${e.win.from === undefined ? '' : '←P' + e.win.from} [${fanNote(e.win.fan)}] 手牌 ${codes(s.hand)} 副露 ${s.melds.map(meldText).join(' ') || '-'}`
+        return `P${e.seat} 胡${tileCode(e.win.tile)} ${e.win.kind}${e.win.from === undefined ? '' : '←P' + e.win.from} [${fanNote(e.win.fan!)}] 手牌 ${codes(s.hand)} 副露 ${s.melds.map(meldText).join(' ') || '-'}`
       }
       case 'payment': {
         const p = e.payment
@@ -577,6 +578,15 @@ const meldText = (m: Meld) => `${{ peng: '碰', minggang: '明杠', bugang: '补
 function actionText(a: Action): string {
   const names = { que: '定缺', discard: '打', hu: '胡', peng: '碰', minggang: '明杠', angang: '暗杠', bugang: '补杠', pass: '过' }
   return names[a.type] + ('tile' in a ? tileCode(a.tile) : '')
+}
+
+/** Hide other winners' fan until the round ends: it would give their hand away. */
+function redact(e: GameEvent, viewer: Seat): GameEvent {
+  if (e.type === 'hu' && e.seat !== viewer) return { ...e, win: { ...e.win, fan: null } }
+  if (e.type === 'payment' && e.payment.reason === 'hu' && e.payment.to !== viewer) {
+    return { ...e, payment: { ...e.payment, note: '胡牌' } }
+  }
+  return e
 }
 
 function deepFreeze<T>(o: T): T {

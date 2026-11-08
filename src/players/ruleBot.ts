@@ -18,7 +18,7 @@ export class RuleBotPlayer implements Player {
   private readonly rng: () => number
 
   constructor(opts: RuleBotOptions = {}) {
-    this.thinkMs = opts.thinkMs ?? 600
+    this.thinkMs = opts.thinkMs ?? 1100
     this.rng = opts.rng ?? Math.random
     this.level = opts.level ?? 1
   }
@@ -115,7 +115,9 @@ export class RuleBotPlayer implements Player {
     for (const s of view.seats) {
       for (const r of s.river) if (!r.claimed) add(r.tile, 1)
       for (const m of s.melds) if (m.tile !== null) add(m.tile, m.kind === 'peng' ? 3 : 4)
+      if (s.seat === view.seat) continue
       if (s.winHand) s.winHand.forEach((t) => add(t, 1))
+      else if (s.win) add(s.win.tile, 1)
     }
     return seen.map((n) => Math.max(0, 4 - n))
   }

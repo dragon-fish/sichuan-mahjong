@@ -17,20 +17,15 @@ const props = defineProps<{
 const vertical = computed(() => props.pos !== 'top')
 const rot = computed(() => (props.pos === 'left' ? 90 : props.pos === 'right' ? 270 : 0))
 const backs = computed(() => new Array(props.sv.handCount).fill(null))
-const winIndex = computed(() => (props.sv.win && props.sv.winHand ? props.sv.winHand.lastIndexOf(props.sv.win.tile) : -1))
+const hiddenBacks = computed(() => new Array(Math.max(0, props.sv.handCount - 1)).fill(null))
 </script>
 
 <template>
   <div class="opp" :class="pos">
     <SeatBadge :sv="sv" :name="name" :total="total" :dealer="dealer" :turn="turn" />
-    <div v-if="sv.winHand" class="hand won">
-      <MjTile
-        v-for="(t, i) in sv.winHand"
-        :key="i"
-        :tile="t"
-        :w="vertical ? 2.2 : 2.4"
-        :hot="i === winIndex"
-      />
+    <div v-if="sv.win" class="hand">
+      <MjTile v-for="(t, i) in hiddenBacks" :key="i" :tile="t" :w="vertical ? 2 : 2.4" :rot="rot" />
+      <MjTile class="win-tile" :tile="sv.win.tile" :w="2.6" hot />
     </div>
     <div v-else class="hand">
       <MjTile v-for="(t, i) in backs" :key="i" :tile="t" :w="vertical ? 2 : 2.4" :rot="rot" />
@@ -59,17 +54,12 @@ const winIndex = computed(() => (props.sv.win && props.sv.winHand ? props.sv.win
   display: flex;
   gap: calc(var(--u) * 0.12);
 }
-.hand.won {
-  gap: calc(var(--u) * 0.2);
-}
-.left .hand:not(.won),
-.right .hand:not(.won) {
+.left .hand,
+.right .hand {
   flex-direction: column;
+  align-items: center;
 }
-.left .hand.won,
-.right .hand.won {
-  flex-wrap: wrap;
-  justify-content: center;
-  width: calc(var(--u) * 11);
+.win-tile {
+  margin: calc(var(--u) * 0.6);
 }
 </style>

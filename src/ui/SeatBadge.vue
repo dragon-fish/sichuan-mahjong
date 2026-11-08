@@ -10,7 +10,8 @@ const winText = computed(() => {
   const w = props.sv.win
   if (!w) return ''
   const how = w.kind === 'zimo' ? '自摸' : w.kind === 'qianggang' ? `抢${SEAT_NAMES[w.from!]}的杠` : `${SEAT_NAMES[w.from!]}点炮`
-  return `胡${tileName(w.tile)} · ${how} · ${w.fan.items.map((it) => it.name).join(' ')} ${w.fan.total}番`
+  const fan = w.fan ? ` · ${w.fan.items.map((it) => it.name).join(' ')} ${w.fan.total}番` : ''
+  return `胡${tileName(w.tile)} · ${how}${fan}`
 })
 </script>
 
