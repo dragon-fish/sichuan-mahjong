@@ -610,8 +610,8 @@ const statusText = computed(() => {
   padding: calc(var(--u) * 0.3) calc(var(--u) * 1);
   border: none;
   border-radius: calc(var(--u) * 0.6);
-  background: rgba(0, 0, 0, 0.3);
-  color: rgba(255, 255, 255, 0.7);
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.85);
 }
 .toolbar button.warn {
   background: #c0392b;
