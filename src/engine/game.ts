@@ -511,7 +511,8 @@ export class Game {
     if (this.aborted) throw new GameAborted()
     const match = actions.find((x) => sameAction(x, a))
     if (!match) throw new Error(`seat ${seat} returned illegal action ${JSON.stringify(a)}`)
-    if (match.type !== 'discard' && match.type !== 'que') {
+    // Log every real choice, including a 胡 or 杠 passed over in favour of a discard.
+    if (actions.some((x) => x.type !== 'discard' && x.type !== 'que')) {
       this.trace.push(`  P${seat} 可选[${actions.filter((x) => x.type !== 'discard').map(actionText).join(' ')}] → ${actionText(match)}`)
     }
     return match
