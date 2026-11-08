@@ -8,7 +8,7 @@ import OpponentSeat from './OpponentSeat.vue'
 import ResultPanel from './ResultPanel.vue'
 import RiverTiles from './RiverTiles.vue'
 import SeatBadge from './SeatBadge.vue'
-import { moveSlot, reconcile, sortSlots, type HandSlot } from './handOrder'
+import { moveSlot, reconcile, tidyOrder, type HandOrder } from './handOrder'
 import { handCounts, provideTableUi, waitsWithLeft, type Wait } from './hints'
 import { ME, SEAT_NAMES, type Session } from './session'
 
@@ -93,11 +93,14 @@ async function copyText(text: string): Promise<boolean> {
   return ok
 }
 
-/** My concealed hand in the order I arranged it (the drawn tile stays apart). */
-const slots = ref<HandSlot[]>([])
+/** My concealed hand, drawn tile included, in the order I arranged it. A fresh draw sits apart on the right. */
+const order = ref<HandOrder>({ slots: [], apart: null })
+const slots = computed(() => order.value.slots)
+/** Slot I last discarded from, so that copy (not another of its kind) leaves the display. */
+let goneSlot: number | null = null
 watch(
-  () => view.value?.hand,
-  (hand) => (slots.value = reconcile(slots.value, hand ?? [], view.value?.seats[ME].que ?? null)),
+  () => [view.value?.hand, view.value?.drawn] as const,
+  ([hand, drawn]) => (order.value = reconcile(order.value, hand ?? [], drawn ?? null, view.value?.seats[ME].que ?? null, goneSlot)),
   { immediate: true },
 )
 // Once 定缺 is known, tidy so the 缺 suit moves to the right.
@@ -106,7 +109,7 @@ watch(
   () => tidy(),
 )
 function tidy() {
-  slots.value = sortSlots(slots.value, me.value.que)
+  order.value = tidyOrder(order.value, me.value.que)
 }
 const discardable = computed(() => new Set(actions.value.flatMap((a) => (a.type === 'discard' ? [a.tile] : []))))
 
@@ -117,8 +120,8 @@ const suitCounts = computed(() => {
   return c
 })
 
-/** A hand slot id, or the drawn tile. */
-type TileKey = number | 'drawn'
+/** A hand slot id. */
+type TileKey = number
 
 /** Selected (raised) tile. */
 const selected = ref<TileKey | null>(null)
@@ -137,7 +140,7 @@ function tapTile(key: TileKey, tile: Tile) {
   const now = performance.now()
   const isDouble = lastTap.key === key && now - lastTap.at < DOUBLE_TAP_MS
   lastTap = { key, at: now }
-  if (isDouble) respond({ type: 'discard', tile })
+  if (isDouble) discard(key, tile)
   else selected.value = key
 }
 
@@ -172,7 +175,7 @@ function dragMove(e: PointerEvent) {
   const dy = e.clientY - d.startY
   if (d.mode === null) {
     if (Math.hypot(dx, dy) < GESTURE_PX) return
-    if (Math.abs(dx) > Math.abs(dy) && d.key !== 'drawn') d.mode = 'move'
+    if (Math.abs(dx) > Math.abs(dy)) d.mode = 'move'
     else if (dy < 0 && discardable.value.has(d.tile)) d.mode = 'lift'
     else {
       drag.value = null
@@ -192,7 +195,7 @@ function dragMove(e: PointerEvent) {
   })
   if (to < 0) to = els.length
   if (to > from) to--
-  if (to !== from) slots.value = moveSlot(slots.value, from, to)
+  if (to !== from) order.value = moveSlot(order.value, from, to)
 }
 
 function dragEnd() {
@@ -200,7 +203,7 @@ function dragEnd() {
   drag.value = null
   if (!d || d.mode === null) return
   gestured = true
-  if (d.mode === 'lift' && -d.dy > d.limit) respond({ type: 'discard', tile: d.tile })
+  if (d.mode === 'lift' && -d.dy > d.limit) discard(d.key, d.tile)
 }
 
 const dragStyle = (key: TileKey) => {
@@ -237,8 +240,8 @@ const shownWaits = computed<Wait[]>(() => {
   if (discardable.value.size > 0) {
     if (selected.value === null) return []
     const key = selected.value
-    const t = key === 'drawn' ? view.value!.drawn : slots.value.find((s) => s.id === key)?.tile
-    return t === undefined || t === null ? [] : (discardWaits.value.get(t) ?? [])
+    const t = slots.value.find((s) => s.id === key)?.tile
+    return t === undefined ? [] : (discardWaits.value.get(t) ?? [])
   }
   if (view.value!.drawn !== null) return []
   return waitsWithLeft(view.value!, handCounts(view.value!))
@@ -247,6 +250,11 @@ const allGone = computed(() => shownWaits.value.length > 0 && shownWaits.value.e
 
 function respond(a: Action) {
   request.value?.respond(a)
+}
+
+function discard(key: TileKey, tile: Tile) {
+  goneSlot = key
+  respond({ type: 'discard', tile })
 }
 
 const buttons = computed(() =>
@@ -306,10 +314,10 @@ const statusText = computed(() => {
     />
 
     <div class="center">
-      <RiverTiles class="r-top" :river="view.seats[2].river" :cols="10" :w="2.6" :hot-last="lastDiscarder === 2" from="top" />
+      <RiverTiles class="r-top" :river="view.seats[2].river" :cols="12" :w="2.6" :hot-last="lastDiscarder === 2" from="top" />
       <RiverTiles class="r-left" :river="view.seats[3].river" :cols="4" :w="2.6" :hot-last="lastDiscarder === 3" from="left" />
       <RiverTiles class="r-right" :river="view.seats[1].river" :cols="4" :w="2.6" :hot-last="lastDiscarder === 1" from="right" />
-      <RiverTiles class="r-bottom" :river="view.seats[0].river" :cols="10" :w="2.6" :hot-last="lastDiscarder === 0" from="bottom" />
+      <RiverTiles class="r-bottom" :river="view.seats[0].river" :cols="12" :w="2.6" :hot-last="lastDiscarder === 0" from="bottom" />
       <div class="info">
         <div class="status">{{ statusText }}</div>
         <div class="console">
@@ -339,6 +347,7 @@ const statusText = computed(() => {
           <MjTile
             v-for="s in slots"
             :key="s.id"
+            :class="{ drawn: s.id === order.apart }"
             :data-slot="s.id"
             :tile="s.tile"
             :w="5.4"
@@ -349,22 +358,6 @@ const statusText = computed(() => {
             :style="dragStyle(s.id)"
             @click="tapTile(s.id, s.tile)"
             @pointerdown="dragStart($event, s.id, s.tile)"
-            @pointermove="dragMove"
-            @pointerup="dragEnd"
-            @pointercancel="drag = null"
-          />
-          <MjTile
-            v-if="view.drawn !== null"
-            class="drawn"
-            :tile="view.drawn"
-            :w="5.4"
-            :que="suitOf(view.drawn) === me.que"
-            :dim="discardable.size > 0 && !discardable.has(view.drawn)"
-            :raised="selected === 'drawn'"
-            :ting="discardWaits.has(view.drawn)"
-            :style="dragStyle('drawn')"
-            @click="tapTile('drawn', view.drawn)"
-            @pointerdown="dragStart($event, 'drawn', view.drawn)"
             @pointermove="dragMove"
             @pointerup="dragEnd"
             @pointercancel="drag = null"
@@ -422,7 +415,7 @@ const statusText = computed(() => {
   padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left);
   display: grid;
   grid-template-columns: calc(var(--u) * 12) 1fr calc(var(--u) * 12);
-  grid-template-rows: calc(var(--u) * 9.5) 1fr calc(var(--u) * 12.5);
+  grid-template-rows: calc(var(--u) * 9.5) 1fr calc(var(--u) * 11.7 + var(--hand-gap-b));
   background:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E"),
     radial-gradient(ellipse 75% 70% at 50% 46%, var(--felt-hi) 0%, var(--felt) 52%, var(--felt-lo) 100%);
@@ -509,8 +502,8 @@ const statusText = computed(() => {
 }
 .console {
   position: relative;
-  width: calc(var(--u) * 8.6);
-  height: calc(var(--u) * 6.4);
+  width: calc(var(--u) * 8.2);
+  height: calc(var(--u) * 5.3);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -530,7 +523,7 @@ const statusText = computed(() => {
   color: var(--text-dim);
 }
 .wall {
-  font-size: calc(var(--u) * 2.8);
+  font-size: calc(var(--u) * 2.5);
   font-weight: 700;
   line-height: 1.05;
   font-variant-numeric: tabular-nums;
@@ -635,7 +628,7 @@ const statusText = computed(() => {
   align-items: flex-end;
   justify-content: center;
   gap: calc(var(--u) * 1.2);
-  padding-bottom: calc(var(--u) * 0.8);
+  padding-bottom: var(--hand-gap-b);
   background: linear-gradient(to top, rgba(0, 0, 0, 0.32), transparent 70%);
 }
 .mine > .badge {

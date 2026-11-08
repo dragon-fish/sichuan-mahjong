@@ -19,6 +19,9 @@ onMounted(() => session.resume() || session.startRound())
 :root {
   /* Table unit: everything scales with the smaller of width and height. */
   --u: min(1vw, 2.1dvh);
+  /* Clear strip under my hand: the iPhone home-indicator swipe starts there. */
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --hand-gap-b: calc(var(--safe-b) + var(--u) * 1.6);
   font-family: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
 
   --felt-hi: #1f6f58;
