@@ -105,9 +105,13 @@ const suitCounts = computed(() => {
 
 type TileKey = number | 'drawn'
 
-/** Selected tile: index into myHand, or 'drawn'. Tap once to raise, again to discard. */
+/** Selected (raised) tile: index into myHand, or 'drawn'. */
 const selected = ref<TileKey | null>(null)
 watch(request, () => (selected.value = null))
+
+/** Only a quick double tap discards; slower taps just inspect, so looking at a tile never throws it. */
+const DOUBLE_TAP_MS = 300
+let lastTap = { key: null as TileKey | null, at: 0 }
 
 function tapTile(key: TileKey, tile: Tile) {
   if (swiped) {
@@ -115,7 +119,10 @@ function tapTile(key: TileKey, tile: Tile) {
     return
   }
   if (!discardable.value.has(tile)) return
-  if (selected.value === key) respond({ type: 'discard', tile })
+  const now = performance.now()
+  const isDouble = lastTap.key === key && now - lastTap.at < DOUBLE_TAP_MS
+  lastTap = { key, at: now }
+  if (isDouble) respond({ type: 'discard', tile })
   else selected.value = key
 }
 
