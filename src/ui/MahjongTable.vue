@@ -30,6 +30,10 @@ function tapRestart() {
 }
 
 const { focus, rankLabels } = provideTableUi()
+const SUIT_CLASS = ['m', 's', 'p']
+
+/** Table side of each seat, as seen from mine. */
+const SIDES = ['e-bottom', 'e-right', 'e-top', 'e-left'] as const
 
 const OPPONENTS = [
   { seat: 1 as Seat, pos: 'right' as const },
@@ -302,13 +306,17 @@ const statusText = computed(() => {
     />
 
     <div class="center">
-      <RiverTiles class="r-top" :river="view.seats[2].river" :cols="10" :w="2.6" :hot-last="lastDiscarder === 2" />
-      <RiverTiles class="r-left" :river="view.seats[3].river" :cols="4" :w="2.6" :hot-last="lastDiscarder === 3" />
-      <RiverTiles class="r-right" :river="view.seats[1].river" :cols="4" :w="2.6" :hot-last="lastDiscarder === 1" />
-      <RiverTiles class="r-bottom" :river="view.seats[0].river" :cols="10" :w="2.6" :hot-last="lastDiscarder === 0" />
+      <RiverTiles class="r-top" :river="view.seats[2].river" :cols="10" :w="2.6" :hot-last="lastDiscarder === 2" from="top" />
+      <RiverTiles class="r-left" :river="view.seats[3].river" :cols="4" :w="2.6" :hot-last="lastDiscarder === 3" from="left" />
+      <RiverTiles class="r-right" :river="view.seats[1].river" :cols="4" :w="2.6" :hot-last="lastDiscarder === 1" from="right" />
+      <RiverTiles class="r-bottom" :river="view.seats[0].river" :cols="10" :w="2.6" :hot-last="lastDiscarder === 0" from="bottom" />
       <div class="info">
-        <div>第 {{ round }} 局 · 剩 {{ view.wallRemaining }} 张</div>
         <div class="status">{{ statusText }}</div>
+        <div class="console">
+          <span v-for="(side, s) in SIDES" :key="s" class="edge" :class="[side, { on: !result && view.turn === s }]" />
+          <div class="round">第{{ round }}局</div>
+          <div class="wall"><small>剩</small>{{ view.wallRemaining }}</div>
+        </div>
         <div v-if="shownWaits.length" class="waits" :class="{ gone: allGone }">
           <span class="ting-tag">听</span>
           <span v-for="w in shownWaits" :key="w.tile" class="wait" :class="{ dead: w.left === 0 }">
@@ -372,11 +380,11 @@ const statusText = computed(() => {
 
     <div v-if="queChoice" class="que-mask">
       <div class="que-box">
-        <div class="que-btns">
-          <button v-for="s in [0, 1, 2] as Suit[]" :key="s" @click="respond({ type: 'que', suit: s })">
-            缺{{ SUIT_NAMES[s] }}<small>{{ suitCounts[s] }} 张</small>
-          </button>
-        </div>
+        <button v-for="s in [0, 1, 2] as Suit[]" :key="s" :class="SUIT_CLASS[s]" @click.stop="respond({ type: 'que', suit: s })">
+          <MjTile :tile="s * 9 + 4" :w="3.2" />
+          <span class="que-name">缺{{ SUIT_NAMES[s] }}</span>
+          <small>{{ suitCounts[s] }} 张</small>
+        </button>
       </div>
     </div>
 
@@ -406,6 +414,7 @@ const statusText = computed(() => {
   </div>
 </template>
 
+
 <style scoped>
 .table {
   position: fixed;
@@ -414,7 +423,9 @@ const statusText = computed(() => {
   display: grid;
   grid-template-columns: calc(var(--u) * 12) 1fr calc(var(--u) * 12);
   grid-template-rows: calc(var(--u) * 9.5) 1fr calc(var(--u) * 12.5);
-  background: radial-gradient(ellipse at center, #237a50 0%, #0f3d28 100%);
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.22'/%3E%3C/svg%3E"),
+    radial-gradient(ellipse 75% 70% at 50% 46%, var(--felt-hi) 0%, var(--felt) 52%, var(--felt-lo) 100%);
   overflow: hidden;
 }
 .left {
@@ -428,9 +439,10 @@ const statusText = computed(() => {
 .top {
   grid-column: 2;
   grid-row: 1;
-  padding-top: calc(var(--u) * 2.4);
+  padding-top: calc(var(--u) * 2.6);
 }
 .center {
+  position: relative;
   grid-column: 2;
   grid-row: 2;
   min-height: 0;
@@ -439,6 +451,22 @@ const statusText = computed(() => {
   grid-template-rows: auto 1fr auto;
   gap: calc(var(--u) * 0.6);
   padding: calc(var(--u) * 0.5) calc(var(--u) * 1);
+}
+/* faint ring printed on the felt */
+.center::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--u) * 30);
+  height: calc(var(--u) * 30);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: calc(var(--u) * 0.15) solid rgba(236, 195, 106, 0.08);
+  box-shadow:
+    0 0 0 calc(var(--u) * 1.2) rgba(236, 195, 106, 0.025),
+    inset 0 0 0 calc(var(--u) * 1.2) rgba(236, 195, 106, 0.025);
+  pointer-events: none;
 }
 .r-top {
   grid-column: 2;
@@ -458,19 +486,147 @@ const statusText = computed(() => {
   grid-row: 3;
   justify-self: center;
 }
+
+/* ------------------------------------------------------------ centre console */
 .info {
   grid-column: 2;
   grid-row: 2;
   align-self: center;
-  justify-self: center;
-  text-align: center;
-  color: #e8f5e9;
-  font-size: calc(var(--u) * 1.5);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: calc(var(--u) * 1.6);
+  min-height: 0;
 }
 .status {
+  justify-self: end;
   font-size: calc(var(--u) * 1.8);
-  color: #ffd84a;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  color: var(--gold);
+  text-shadow: 0 0 calc(var(--u) * 1) rgba(236, 195, 106, 0.35);
+  white-space: nowrap;
 }
+.console {
+  position: relative;
+  width: calc(var(--u) * 8.6);
+  height: calc(var(--u) * 6.4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: calc(var(--u) * 1.4);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 45%),
+    linear-gradient(180deg, #0c2a24, #051512);
+  border: calc(var(--u) * 0.12) solid var(--panel-line);
+  box-shadow:
+    0 calc(var(--u) * 0.5) calc(var(--u) * 1.4) rgba(0, 0, 0, 0.45),
+    inset 0 0 calc(var(--u) * 1) rgba(0, 0, 0, 0.6);
+}
+.round {
+  font-size: calc(var(--u) * 1.1);
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+.wall {
+  font-size: calc(var(--u) * 2.8);
+  font-weight: 700;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold-hi);
+}
+.wall small {
+  margin-right: calc(var(--u) * 0.2);
+  font-size: calc(var(--u) * 1.1);
+  font-weight: 400;
+  color: var(--text-dim);
+}
+/* the console edge facing the seat to act lights up */
+.edge {
+  position: absolute;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  transition:
+    background 0.25s,
+    box-shadow 0.25s;
+}
+.edge.e-bottom,
+.edge.e-top {
+  left: 22%;
+  right: 22%;
+  height: calc(var(--u) * 0.35);
+}
+.edge.e-left,
+.edge.e-right {
+  top: 24%;
+  bottom: 24%;
+  width: calc(var(--u) * 0.35);
+}
+.edge.e-bottom {
+  bottom: calc(var(--u) * 0.35);
+}
+.edge.e-top {
+  top: calc(var(--u) * 0.35);
+}
+.edge.e-left {
+  left: calc(var(--u) * 0.35);
+}
+.edge.e-right {
+  right: calc(var(--u) * 0.35);
+}
+.edge.on {
+  background: var(--gold);
+  box-shadow: 0 0 calc(var(--u) * 0.8) var(--gold);
+  animation: edge-pulse 1.2s ease-in-out infinite;
+}
+@keyframes edge-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+.waits {
+  justify-self: start;
+  display: flex;
+  align-items: flex-end;
+  gap: calc(var(--u) * 0.6);
+  padding: calc(var(--u) * 0.5) calc(var(--u) * 0.8) calc(var(--u) * 0.3);
+  border-radius: calc(var(--u) * 1);
+  background: rgba(4, 16, 14, 0.55);
+  border: calc(var(--u) * 0.12) solid rgba(95, 216, 150, 0.35);
+}
+.waits.gone {
+  border-color: rgba(255, 110, 90, 0.45);
+}
+.ting-tag {
+  align-self: center;
+  padding: 0 calc(var(--u) * 0.5);
+  border-radius: 999px;
+  background: linear-gradient(#5fd896, #1f955a);
+  color: #fff;
+  font-size: calc(var(--u) * 1.4);
+  font-weight: 700;
+}
+.waits.gone .ting-tag {
+  background: linear-gradient(#ff7a6a, #c0392b);
+}
+.wait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: calc(var(--u) * 1.3);
+  line-height: 1.1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.wait.dead {
+  opacity: 0.45;
+}
+.wait.dead b {
+  color: var(--down);
+}
+
+/* ------------------------------------------------------------ my seat */
 .mine {
   grid-column: 1 / 4;
   grid-row: 3;
@@ -479,7 +635,8 @@ const statusText = computed(() => {
   align-items: flex-end;
   justify-content: center;
   gap: calc(var(--u) * 1.2);
-  padding-bottom: calc(var(--u) * 1);
+  padding-bottom: calc(var(--u) * 0.8);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.32), transparent 70%);
 }
 .mine > .badge {
   align-self: center;
@@ -487,46 +644,24 @@ const statusText = computed(() => {
 .hand {
   display: flex;
   align-items: flex-end;
-  gap: calc(var(--u) * 0.35);
+  gap: calc(var(--u) * 0.4);
 }
 .hand .tile {
   cursor: pointer;
   touch-action: none;
 }
-.waits {
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: calc(var(--u) * 0.6);
-  margin-top: calc(var(--u) * 0.4);
-}
-.ting-tag {
-  align-self: center;
-  padding: 0 calc(var(--u) * 0.5);
-  border-radius: calc(var(--u) * 0.5);
-  background: #27ae60;
-  color: #fff;
-  font-weight: bold;
-}
-.waits.gone .ting-tag {
-  background: #c0392b;
-}
-.wait {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  font-size: calc(var(--u) * 1.4);
-  line-height: 1.2;
-}
-.wait.dead {
-  opacity: 0.5;
-}
-.wait.dead b {
-  color: #ff6b6b;
-}
 .drawn {
   margin-left: calc(var(--u) * 1.2);
+  animation: draw-in 0.3s cubic-bezier(0.2, 0.8, 0.3, 1.15) both;
 }
+@keyframes draw-in {
+  from {
+    translate: 60% -30%;
+    opacity: 0;
+  }
+}
+
+/* ------------------------------------------------------------ buttons */
 .actions {
   position: absolute;
   right: calc(var(--u) * 3);
@@ -534,67 +669,132 @@ const statusText = computed(() => {
   display: flex;
   align-items: center;
   gap: calc(var(--u) * 1);
-  padding: calc(var(--u) * 0.6) calc(var(--u) * 1);
-  border-radius: calc(var(--u) * 1);
-  background: rgba(0, 0, 0, 0.4);
+  padding: calc(var(--u) * 0.7) calc(var(--u) * 1.1) calc(var(--u) * 0.9);
+  border-radius: calc(var(--u) * 1.4);
+  background: linear-gradient(180deg, rgba(12, 40, 34, 0.9), rgba(4, 16, 14, 0.9));
+  border: calc(var(--u) * 0.12) solid var(--panel-line);
+  box-shadow: 0 calc(var(--u) * 0.6) calc(var(--u) * 1.6) rgba(0, 0, 0, 0.5);
   z-index: 5;
+  animation: rise 0.22s cubic-bezier(0.2, 0.8, 0.3, 1.2) both;
+}
+@keyframes rise {
+  from {
+    translate: 0 40%;
+    opacity: 0;
+  }
+}
+.actions .tile {
+  margin-right: calc(var(--u) * 0.4);
 }
 .actions button,
-.que-btns button {
-  font-size: calc(var(--u) * 2.4);
-  padding: calc(var(--u) * 0.5) calc(var(--u) * 2);
+.que-box button {
+  --c1: #7d8b90;
+  --c2: #4b585d;
+  --c3: #2e383c;
+  position: relative;
   border: none;
-  border-radius: calc(var(--u) * 0.8);
   color: #fff;
-  font-weight: bold;
+  font-weight: 800;
+  text-shadow: 0 calc(var(--u) * 0.12) 0 rgba(0, 0, 0, 0.35);
+  background: linear-gradient(180deg, var(--c1), var(--c2));
+  box-shadow:
+    inset 0 calc(var(--u) * 0.15) 0 rgba(255, 255, 255, 0.35),
+    0 calc(var(--u) * 0.45) 0 var(--c3),
+    0 calc(var(--u) * 0.7) calc(var(--u) * 1) rgba(0, 0, 0, 0.45);
+  transition:
+    translate 0.06s,
+    box-shadow 0.06s;
 }
-.hu {
-  background: #e74c3c;
+.actions button:active,
+.que-box button:active {
+  translate: 0 calc(var(--u) * 0.35);
+  box-shadow:
+    inset 0 calc(var(--u) * 0.15) 0 rgba(255, 255, 255, 0.35),
+    0 calc(var(--u) * 0.1) 0 var(--c3),
+    0 calc(var(--u) * 0.3) calc(var(--u) * 0.6) rgba(0, 0, 0, 0.45);
 }
-.peng {
-  background: #2980b9;
+.actions button {
+  min-width: calc(var(--u) * 6.4);
+  font-size: calc(var(--u) * 2.4);
+  padding: calc(var(--u) * 0.5) calc(var(--u) * 1.6);
+  border-radius: calc(var(--u) * 1);
 }
-.gang {
-  background: #8e44ad;
+.actions .hu {
+  --c1: #ff7d4d;
+  --c2: #d8262a;
+  --c3: #861518;
+  color: var(--gold-hi);
+  outline: calc(var(--u) * 0.15) solid rgba(255, 220, 140, 0.8);
+  outline-offset: calc(var(--u) * -0.35);
 }
-.pass {
-  background: #7f8c8d;
+.actions .peng {
+  --c1: #4fa2ff;
+  --c2: #2163c9;
+  --c3: #133b7a;
 }
+.actions .gang {
+  --c1: #b17cff;
+  --c2: #6d3bd0;
+  --c3: #3f1f80;
+}
+
+/* ------------------------------------------------------------ 定缺 picker */
 .que-mask {
   position: fixed;
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(0, 0, 0, 0.25);
+  background: radial-gradient(ellipse at 50% 40%, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.4));
   z-index: 10;
   pointer-events: none;
 }
 .que-box {
   pointer-events: auto;
-  background: rgba(0, 0, 0, 0.7);
-  color: #fff;
-  padding: calc(var(--u) * 1.5) calc(var(--u) * 2.5);
-  border-radius: calc(var(--u) * 1.2);
-  text-align: center;
-  font-size: calc(var(--u) * 2);
+  display: flex;
+  gap: calc(var(--u) * 1.6);
+  padding: calc(var(--u) * 1.2) calc(var(--u) * 1.6);
+  border-radius: calc(var(--u) * 1.8);
+  background: linear-gradient(180deg, rgba(12, 40, 34, 0.94), rgba(4, 16, 14, 0.94));
+  border: calc(var(--u) * 0.12) solid var(--panel-line);
+  box-shadow: 0 calc(var(--u) * 1) calc(var(--u) * 3) rgba(0, 0, 0, 0.55);
   /* keep the hand visible below */
   transform: translateY(-30%);
+  animation: rise 0.25s cubic-bezier(0.2, 0.8, 0.3, 1.2) both;
 }
-.que-btns {
-  display: flex;
-  gap: calc(var(--u) * 1.5);
-  margin-top: calc(var(--u) * 1);
-}
-.que-btns button {
-  background: #16a085;
+.que-box button {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: calc(var(--u) * 0.3);
+  min-width: calc(var(--u) * 9);
+  padding: calc(var(--u) * 1) calc(var(--u) * 1.4) calc(var(--u) * 0.7);
+  border-radius: calc(var(--u) * 1.2);
 }
-.que-btns small {
-  font-size: calc(var(--u) * 1.3);
-  font-weight: normal;
+.que-box button.m {
+  --c1: #e8615a;
+  --c2: #a8261f;
+  --c3: #5e1410;
 }
+.que-box button.s {
+  --c1: #45b27a;
+  --c2: #1d6d44;
+  --c3: #0e3b24;
+}
+.que-box button.p {
+  --c1: #5a8ae8;
+  --c2: #2449a3;
+  --c3: #132a5f;
+}
+.que-name {
+  font-size: calc(var(--u) * 2.2);
+}
+.que-box small {
+  font-size: calc(var(--u) * 1.2);
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+/* ------------------------------------------------------------ toolbar */
 .toolbar {
   position: fixed;
   left: 50%;
@@ -603,23 +803,36 @@ const statusText = computed(() => {
   /* above the result panel, so a finished round can still be copied */
   z-index: 25;
   display: flex;
-  gap: calc(var(--u) * 0.6);
+  padding: calc(var(--u) * 0.2);
+  border-radius: 999px;
+  background: rgba(4, 16, 14, 0.66);
+  border: calc(var(--u) * 0.1) solid rgba(236, 195, 106, 0.2);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 .toolbar button {
   font-size: calc(var(--u) * 1.3);
-  padding: calc(var(--u) * 0.3) calc(var(--u) * 1);
+  padding: calc(var(--u) * 0.25) calc(var(--u) * 1.1);
   border: none;
-  border-radius: calc(var(--u) * 0.6);
-  background: rgba(0, 0, 0, 0.55);
-  color: rgba(255, 255, 255, 0.85);
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(243, 239, 226, 0.88);
+  letter-spacing: 0.05em;
 }
-.toolbar button.warn {
-  background: #c0392b;
-  color: #fff;
+.toolbar button + button {
+  box-shadow: inset calc(var(--u) * 0.1) 0 0 rgba(236, 195, 106, 0.18);
+}
+.toolbar button:active {
+  background: rgba(255, 255, 255, 0.1);
 }
 .toolbar button.on {
-  background: #27ae60;
+  color: var(--gold);
+  font-weight: 700;
+}
+.toolbar button.warn {
+  background: linear-gradient(#e2483c, #a51f17);
   color: #fff;
+  box-shadow: none;
 }
 .toast {
   position: fixed;
@@ -627,11 +840,12 @@ const statusText = computed(() => {
   top: 40%;
   transform: translateX(-50%);
   z-index: 30;
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
+  background: rgba(4, 16, 14, 0.88);
+  border: calc(var(--u) * 0.1) solid var(--panel-line);
+  color: var(--gold-hi);
   padding: calc(var(--u) * 0.8) calc(var(--u) * 2);
-  border-radius: calc(var(--u) * 0.8);
-  font-size: calc(var(--u) * 1.8);
+  border-radius: 999px;
+  font-size: calc(var(--u) * 1.7);
 }
 .diag-mask {
   position: fixed;
@@ -644,8 +858,9 @@ const statusText = computed(() => {
 .diag-box {
   width: 85vw;
   height: 80dvh;
-  background: #fff;
-  border-radius: calc(var(--u) * 1);
+  background: #0c2621;
+  border: calc(var(--u) * 0.12) solid var(--panel-line);
+  border-radius: calc(var(--u) * 1.2);
   padding: calc(var(--u) * 1);
   display: flex;
   flex-direction: column;
@@ -655,9 +870,25 @@ const statusText = computed(() => {
 .diag-box textarea {
   flex: 1;
   font-size: 12px;
+  background: #051512;
+  color: var(--text);
+  border: none;
+  border-radius: calc(var(--u) * 0.6);
   user-select: text;
   -webkit-user-select: text;
 }
+.diag-box button {
+  align-self: center;
+  padding: calc(var(--u) * 0.4) calc(var(--u) * 3);
+  border: none;
+  border-radius: 999px;
+  background: var(--gold);
+  color: #3a2600;
+  font-size: calc(var(--u) * 1.6);
+  font-weight: 700;
+}
+
+/* ------------------------------------------------------------ 碰 / 杠 / 胡 callouts */
 .flash-layer {
   position: fixed;
   inset: 0;
@@ -669,30 +900,64 @@ const statusText = computed(() => {
   pointer-events: none;
 }
 .flash {
-  text-align: center;
+  --glow: #2e86de;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   animation: flash 1.6s ease-out forwards;
 }
+.flash-gang {
+  --glow: #a55eea;
+}
+.flash-hu {
+  --glow: #ff6a2a;
+}
+/* burst of light behind the glyph */
+.flash::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 58%;
+  width: calc(var(--u) * 26);
+  height: calc(var(--u) * 26);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background:
+    repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--glow) 40%, transparent) 0 6deg, transparent 6deg 18deg),
+    radial-gradient(circle, color-mix(in srgb, var(--glow) 70%, transparent), transparent 62%);
+  -webkit-mask: radial-gradient(circle, #000 25%, transparent 68%);
+  mask: radial-gradient(circle, #000 25%, transparent 68%);
+  z-index: -1;
+  animation: burst 1.6s linear forwards;
+}
+@keyframes burst {
+  to {
+    transform: translate(-50%, -50%) rotate(40deg);
+  }
+}
 .flash-who {
-  font-size: calc(var(--u) * 2.4);
-  color: #fff;
-  text-shadow: 0 0 calc(var(--u) * 0.5) #000;
+  padding: calc(var(--u) * 0.1) calc(var(--u) * 1.2);
+  border-radius: 999px;
+  background: rgba(4, 16, 14, 0.75);
+  border: calc(var(--u) * 0.1) solid var(--panel-line);
+  font-size: calc(var(--u) * 1.8);
+  color: var(--gold-hi);
 }
 .flash-text {
+  font-family: 'Kaiti SC', 'STKaiti', 'KaiTi', 'BiauKai', serif;
   font-size: calc(var(--u) * 13);
-  line-height: 1;
+  line-height: 1.05;
   font-weight: 900;
-  color: #fff;
-  -webkit-text-stroke: calc(var(--u) * 0.25) rgba(0, 0, 0, 0.6);
-}
-.flash-peng .flash-text {
-  text-shadow: 0 0 calc(var(--u) * 2) #2e86de, 0 0 calc(var(--u) * 5) #2e86de;
-}
-.flash-gang .flash-text {
-  text-shadow: 0 0 calc(var(--u) * 2) #a55eea, 0 0 calc(var(--u) * 5) #a55eea;
+  background: linear-gradient(180deg, #ffffff 15%, color-mix(in srgb, var(--glow) 35%, #fff) 60%, var(--glow) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-stroke: calc(var(--u) * 0.2) rgba(0, 0, 0, 0.55);
+  filter: drop-shadow(0 0 calc(var(--u) * 1.4) var(--glow)) drop-shadow(0 calc(var(--u) * 0.4) calc(var(--u) * 0.3) rgba(0, 0, 0, 0.6));
 }
 .flash-hu .flash-text {
-  color: #ffe066;
-  text-shadow: 0 0 calc(var(--u) * 2) #ff4d4d, 0 0 calc(var(--u) * 6) #ff9f1a;
+  background-image: linear-gradient(180deg, #fffbe6 10%, #ffd65a 50%, #ff8a1e 100%);
 }
 @keyframes flash {
   0% {
