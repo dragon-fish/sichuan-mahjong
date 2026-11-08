@@ -12,7 +12,21 @@ import { handCounts, provideTableUi, waitsWithLeft, type Wait } from './hints'
 import { ME, SEAT_NAMES, type Session } from './session'
 
 const props = defineProps<{ session: Session }>()
-const { view, request, result, totals, startTotals, round, floats, startRound, diagnostics } = props.session
+const { view, request, result, totals, startTotals, round, floats, startRound, abandonRound, diagnostics } = props.session
+
+/** 重开 needs a second tap within 3s. */
+const confirmRestart = ref(false)
+let confirmTimer: ReturnType<typeof setTimeout> | undefined
+function tapRestart() {
+  clearTimeout(confirmTimer)
+  if (confirmRestart.value) {
+    confirmRestart.value = false
+    abandonRound()
+    return
+  }
+  confirmRestart.value = true
+  confirmTimer = setTimeout(() => (confirmRestart.value = false), 3000)
+}
 
 const { focus, rankLabels } = provideTableUi()
 
@@ -314,6 +328,7 @@ const statusText = computed(() => {
 
     <div class="toolbar">
       <button :class="{ on: rankLabels }" @click="rankLabels = !rankLabels">数字</button>
+      <button v-if="!result" :class="{ warn: confirmRestart }" @click="tapRestart">{{ confirmRestart ? '确认？' : '重开' }}</button>
       <button @click="copyDiagnostics">诊断</button>
     </div>
     <div v-if="toast" class="toast">{{ toast }}</div>
@@ -534,6 +549,10 @@ const statusText = computed(() => {
   border-radius: calc(var(--u) * 0.6);
   background: rgba(0, 0, 0, 0.3);
   color: rgba(255, 255, 255, 0.7);
+}
+.toolbar button.warn {
+  background: #c0392b;
+  color: #fff;
 }
 .toolbar button.on {
   background: #27ae60;

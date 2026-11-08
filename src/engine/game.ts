@@ -77,6 +77,13 @@ export interface GameOptions {
   onCheckpoint?: (snap: GameSnapshot) => void
 }
 
+/** Thrown out of `run()` once the round has been abandoned. */
+export class GameAborted extends Error {
+  constructor() {
+    super('round abandoned')
+  }
+}
+
 export class Game {
   readonly rules: RuleConfig
   readonly dealer: Seat
@@ -143,6 +150,17 @@ export class Game {
     return JSON.parse(JSON.stringify(snap))
   }
 
+  private aborted = false
+
+  /**
+   * Abandon the round: no more events, checkpoints or decisions. `run()` rejects with GameAborted
+   * as soon as a pending decision returns; one waiting on a human simply never settles.
+   */
+  abort() {
+    this.aborted = true
+    this.listeners.clear()
+  }
+
   get finished(): boolean {
     return this.step.kind === 'done'
   }
@@ -182,6 +200,7 @@ export class Game {
   /** Play from the current step (a fresh deal, or wherever a restored snapshot left off) to the end. */
   async run(): Promise<RoundResult> {
     while (this.step.kind !== 'done') {
+      if (this.aborted) throw new GameAborted()
       this.onCheckpoint?.(this.snapshot())
       this.step = await this.advance(this.step)
     }
@@ -479,6 +498,7 @@ export class Game {
   // ---------------------------------------------------------------- helpers
 
   private emit(e: GameEvent) {
+    if (this.aborted) throw new GameAborted()
     deepFreeze(e)
     this.trace.push(this.describe(e))
     this.log.push(e)
@@ -488,6 +508,7 @@ export class Game {
 
   private async ask(seat: Seat, actions: Action[]): Promise<Action> {
     const a = await this.players[seat].decide(this.viewFor(seat), actions)
+    if (this.aborted) throw new GameAborted()
     const match = actions.find((x) => sameAction(x, a))
     if (!match) throw new Error(`seat ${seat} returned illegal action ${JSON.stringify(a)}`)
     if (match.type !== 'discard' && match.type !== 'que') {

@@ -1,5 +1,5 @@
 import { ref, shallowRef } from 'vue'
-import { Game, type GameSnapshot } from '../engine/game'
+import { Game, GameAborted, type GameSnapshot } from '../engine/game'
 import type { GameEvent, Player, PlayerView, RoundResult, Seat } from '../engine/types'
 import { HumanPlayer, type HumanRequest } from '../players/human'
 import { RuleBotPlayer } from '../players/ruleBot'
@@ -79,7 +79,13 @@ export function useSession() {
   }
 
   async function play(g: Game) {
-    const r = await g.run()
+    let r: RoundResult
+    try {
+      r = await g.run()
+    } catch (err) {
+      if (err instanceof GameAborted) return
+      throw err
+    }
     totals.value = totals.value.map((t, i) => t + r.deltas[i])
     dealer = nextDealer(g, r) ?? dealer
     result.value = r
@@ -93,6 +99,16 @@ export function useSession() {
     const g = new Game(lineup(), { dealer, onCheckpoint: save })
     attach(g)
     await play(g)
+  }
+
+  /** Throw the current round away (it scores nothing) and deal a new one with the same dealer. */
+  function abandonRound() {
+    if (!game || game.finished) return
+    game.abort()
+    request.value = null
+    floats.value = []
+    totals.value = [...startTotals.value]
+    void startRound()
   }
 
   /** Continue the saved sitting, if any. Returns false when there is nothing usable to resume. */
@@ -126,7 +142,7 @@ export function useSession() {
     return [`四川麻将诊断 · 第${round.value}局 · ${seats} · 累计 ${totals.value.join(' ')}`, game.dump()].join('\n')
   }
 
-  return { view, request, result, totals, startTotals, round, floats, startRound, resume, diagnostics }
+  return { view, request, result, totals, startTotals, round, floats, startRound, abandonRound, resume, diagnostics }
 }
 
 /** First winner deals next; when the first win was 一炮多响, the discarder deals. */
