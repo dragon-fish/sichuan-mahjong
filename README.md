@@ -4,7 +4,7 @@
 
 浏览器里的单机四川麻将：你和 3 个电脑打一局血战到底。手机横屏、桌面浏览器都能玩，刷新页面后牌局接着打。
 
-**在线试玩：<https://dragon-fish.github.io/sichuan-mahjong/>**
+**在线试玩：<https://pages.epb.wiki/sichuan-mahjong/>**
 
 ## 规则
 
