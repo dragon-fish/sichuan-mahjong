@@ -17,13 +17,22 @@ export const tileName = (t: Tile): string => RANK_NAMES[t % 9] + SUIT_NAMES[suit
 /** Compact code, e.g. 3m. Handy for logs and LLM prompts. */
 export const tileCode = (t: Tile): string => `${rankOf(t)}${SUIT_CODES[suitOf(t)]}`
 
+/** Standard mahjong notation: digits then suit letter, e.g. 2468m3556s or 123m 55p. */
+export function tilesCode(tiles: readonly Tile[]): string {
+  let out = ''
+  tiles.forEach((t, i) => {
+    out += rankOf(t)
+    if (i === tiles.length - 1 || suitOf(tiles[i + 1]) !== suitOf(t)) out += SUIT_CODES[suitOf(t)]
+  })
+  return out
+}
+
 export function parseTiles(codes: string): Tile[] {
-  // "123m 55p" style
+  const compact = codes.replace(/\s+/g, '')
+  if (!/^(\d+[msp])*$/.test(compact)) throw new Error(`bad tile notation: ${codes}`)
   const out: Tile[] = []
-  for (const group of codes.trim().split(/\s+/)) {
-    const suit = SUIT_CODES.indexOf(group.slice(-1)) as Suit
-    if (suit < 0) throw new Error(`bad tile group: ${group}`)
-    for (const ch of group.slice(0, -1)) out.push(tile(suit, Number(ch)))
+  for (const [, digits, s] of compact.matchAll(/(\d+)([msp])/g)) {
+    for (const ch of digits) out.push(tile(SUIT_CODES.indexOf(s) as Suit, Number(ch)))
   }
   return out
 }

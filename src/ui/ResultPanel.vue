@@ -66,7 +66,8 @@ const REASON = { hu: '胡牌', minggang: '明杠', bugang: '补杠', angang: '�
 h2 {
   margin: 0 0 calc(var(--u) * 0.8);
   font-size: calc(var(--u) * 2.2);
-  text-align: center;
+  /* the toolbar sits top-centre over this panel */
+  text-align: left;
 }
 .body {
   flex: 1;

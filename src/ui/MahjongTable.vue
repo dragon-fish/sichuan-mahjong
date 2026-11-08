@@ -600,7 +600,8 @@ const statusText = computed(() => {
   left: 50%;
   top: calc(var(--u) * 0.5);
   transform: translateX(-50%);
-  z-index: 8;
+  /* above the result panel, so a finished round can still be copied */
+  z-index: 25;
   display: flex;
   gap: calc(var(--u) * 0.6);
 }

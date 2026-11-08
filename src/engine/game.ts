@@ -1,5 +1,5 @@
 import { canHu, holdsSuit, maxWaitFan, winFan, type WinSituation } from './hand'
-import { SUIT_NAMES, fullWall, shuffle, sortTiles, suitOf, tileCode, tileName, toCounts, type Suit, type Tile } from './tiles'
+import { SUIT_NAMES, fullWall, shuffle, sortTiles, suitOf, tileCode, tileName, tilesCode, toCounts, type Suit, type Tile } from './tiles'
 import {
   DEFAULT_RULES,
   SEATS,
@@ -593,7 +593,7 @@ export class Game {
   }
 }
 
-const codes = (tiles: readonly Tile[]) => tiles.map(tileCode).join('') || '-'
+const codes = (tiles: readonly Tile[]) => tilesCode(tiles) || '-'
 const meldText = (m: Meld) => `${{ peng: '碰', minggang: '明杠', bugang: '补杠', angang: '暗杠' }[m.kind]}${tileCode(m.tile)}`
 
 function actionText(a: Action): string {
