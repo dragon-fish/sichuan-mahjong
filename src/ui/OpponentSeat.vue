@@ -52,12 +52,24 @@ const hiddenBacks = computed(() => new Array(Math.max(0, props.sv.handCount - 1)
 }
 .hand {
   display: flex;
+  align-items: center;
   gap: calc(var(--u) * 0.12);
+  padding: calc(var(--u) * 0.35);
+  border-radius: calc(var(--u) * 0.8);
+  background: rgba(0, 0, 0, 0.16);
 }
 .left .hand,
 .right .hand {
   flex-direction: column;
   align-items: center;
+}
+.left > .badge {
+  align-self: flex-start;
+  margin-left: calc(var(--u) * 0.6);
+}
+.right > .badge {
+  align-self: flex-end;
+  margin-right: calc(var(--u) * 0.6);
 }
 .win-tile {
   margin: calc(var(--u) * 0.6);
